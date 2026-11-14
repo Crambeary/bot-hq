@@ -78,7 +78,7 @@ Why `auth.json` persistence depends on the Hermes-home volumes: Codex/Claude OAu
 | `server/src/vnc.ts:6,159-164` | Replace the Orgo `wss://` upstream and `orgo.vncPassword` with a raw TCP connection to `127.0.0.1:5900+N` (x11vnc, security None). Keep the `WatchFilter` and mode handling (`vnc.ts:126,135`). Add an `Origin` check on the websocket upgrade (reject unless it matches `APP_URL`/`Host`); there is none today. |
 | `server/src/routes.ts:65-67` | `GET /auth/me` returns `{user, devLogin, features}`. |
 | `server/src/routes.ts:388-395` | Screenshot: run `scrot` or ImageMagick `import -display :N -window root png:-` through `box.bash`, return PNG. |
-| `server/src/routes.ts:99` | Keep the `DEV_LOGIN` gate; add loopback-only and `ALLOWED_EMAILS` requirement checks (section 5). |
+| `server/src/routes.ts:99` | Keep the `DEV_LOGIN` gate; refuse to enable it with an empty `ALLOWED_EMAILS`, and check `Origin`/`Host` against `APP_URL` (section 5). Do NOT use a loopback-source check: it is backwards in a container. |
 | `server/src/routes.ts:15,409,438,466` | Guard `startGoogleLogin`, `/apps/*` (`connectedToolkits`, `catalog`), and `/voice` mount behind `features`; answer 503 `{error:'disabled'}` when off. Google sign-in follows `composio`. |
 | `server/src/routes-config.ts:13,199-202,253-254` | Remove the Orgo `exportFile` branch (non-local only) and the `orgo` import; use `env.libRoot` instead of the `LIB_ROOT` constant at line 201. |
 | `server/src/composio.ts:7` | Lazy client via `getComposio()`; throws `FeatureDisabled` when no key. `connectedToolkits`, `catalog`, `toolkitInfo` return empty when disabled. |
@@ -96,8 +96,9 @@ Why `auth.json` persistence depends on the Hermes-home volumes: Codex/Claude OAu
 
 | File | Change |
 |---|---|
-| `hqlib.py` | Read `HQ_ROOT`, `HQ_LOGS`, `HQ_PROFILES`, `HQ_FILES` from env (defaults `/opt/hq`, `/var/log/hq`, `/root/grokbot/profiles`, `/root/grokbot/files`). Remove or no-op `install_packages()` (runtime `apt-get`); the Dockerfile owns packages. Make the dbus-session requirement tolerant (UNVERIFIED). |
-| `hq-screen.py`, `hq-shell.py` | Same env-driven paths; no apt. |
+| `hqlib.py` | Read `HQ_ROOT`, `HQ_LOGS`, `HQ_PROFILES`, `HQ_FILES` from env (defaults `/opt/hq`, `/var/log/hq`, `/root/grokbot/profiles`, `/root/grokbot/files`). Make the dbus-session requirement tolerant (UNVERIFIED). |
+| `hq-screen.py` | Same env-driven paths. In `do_base` (`hq-screen.py:327`), remove or no-op `install_packages()`, which runs `apt-get` at runtime; the Dockerfile owns packages. |
+| `hq-shell.py` | Same env-driven paths. |
 | `hq-home.py` | Same paths; stays on `127.0.0.1:7391`. |
 
 ### Scripts, docs, tests
@@ -169,11 +170,11 @@ Acceptance: create 2-3 bots, each shows its own screen and Chrome (CDP 9200+N re
 ### Phase 3: Claude OAuth, hardening, UI polish
 
 1. Engine settings -> Anthropic sign-in (`hermes auth add anthropic --type oauth`) completes on a bot screen.
-2. `DEV_LOGIN` hardening: loopback-only, `ALLOWED_EMAILS` required, Origin/Host check (section 5).
+2. `DEV_LOGIN` hardening: `ALLOWED_EMAILS` required, Origin/Host check (section 5).
 3. Remaining web hiding and wording from section 3.
 4. Prompt snapshot test (byte-stable with features on).
 
-Acceptance: a Claude-backed bot replies; `DEV_LOGIN=1` from a non-loopback source returns 403; a websocket upgrade with a foreign `Origin` is refused; `/api/voice/*` and `/api/apps/*` return 503.
+Acceptance: a Claude-backed bot replies; the server refuses to start (or `/api/auth/dev` returns 403) with `DEV_LOGIN=1` and empty `ALLOWED_EMAILS`, and `/api/auth/dev` with a foreign `Origin` returns 403; a websocket upgrade with a foreign `Origin` is refused; `/api/voice/*` and `/api/apps/*` return 503.
 
 ### Phase 4: optional
 
@@ -199,7 +200,7 @@ Container exposure: only `127.0.0.1:8787:8787` on the host. Everything else (VNC
 Auth:
 
 - Default sign-in is the owner link: `POST /api/auth/owner` with bearer = HMAC-SHA256(`SESSION_SECRET`, `owner-login`) returns a one-time 15-minute link redeemed at `/api/auth/link/:token` (`server/src/routes.ts:116`, `server/src/lib/auth.ts:49-52`). It works with `DEV_LOGIN` off, checks `ALLOWED_EMAILS` or an existing account, and must be run through `docker compose exec` because it posts to `127.0.0.1:$PORT`.
-- `DEV_LOGIN` is a fallback only. `.env.example` currently sets it to `1`; the local default must be `0`. When on: accept only loopback sources, require non-empty `ALLOWED_EMAILS`, and check `Origin`/`Host`.
+- `DEV_LOGIN` is a fallback only. `.env.example` currently sets it to `1`; the local default must be `0`. A loopback-source check does not work here, because the browser's requests arrive through Docker's port forward (a bridge address, not loopback) while the bots call the server from container loopback. Such a check would lock the user out and let bots in. When on: require non-empty `ALLOWED_EMAILS` and check `Origin`/`Host` against `APP_URL`. Even then, any bot can call `/api/auth/dev` with an allowed email and get a session. That is another reason to keep it off.
 - Session cookie is httpOnly, SameSite Lax, and `secure` only when `APP_URL` starts with `https:` (`server/src/lib/auth.ts:17`). A plain `http://localhost` setup therefore has a non-secure cookie; acceptable for loopback, not for a tailnet over http.
 - MCP: each bot's bearer is HMAC(`SESSION_SECRET`, `mcp:<botId>`) (`server/src/engine.ts:59`), so any bot with shell can read its own, and any process that can read `SESSION_SECRET` can mint every bot's. Keep `SESSION_SECRET` out of the bot-readable environment where possible (see below; this is limited since bots are root).
 - `SESSION_SECRET` is supplied through a file or docker secret and checked only by the server starting and `sign-in-link.sh` working. Never print or read it. Honest caveat: a bot with root in the container can read a secret mounted in the container.
@@ -295,7 +296,7 @@ secrets:
 volumes: {hq-data: {}, hermes-primary: {}, hq-engines: {}, hq-grokbot: {}, hq-logs: {}}
 ```
 
-The secret file mount itself needs `:z` handling by Docker (compose secrets are copied; verify the relabel works on this SELinux host). `SESSION_SECRET_FILE` is a proposed env var, not present today.
+Without Swarm, compose file secrets are bind mounts, and `secrets:` has no `:z` option. On this SELinux-enforcing host, confirm the container can read the file by checking that the server starts. If it can't, relabel the host file for containers (for example `chcon -t container_file_t ./secrets/session_secret`). This is UNVERIFIED. `SESSION_SECRET_FILE` is a proposed env var; it does not exist today.
 
 ## 7. Risks and open questions for Marc
 
