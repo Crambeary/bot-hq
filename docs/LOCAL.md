@@ -297,7 +297,7 @@ secrets:
 volumes: {hq-data: {}, hermes-primary: {}, hq-engines: {}, hq-grokbot: {}, hq-logs: {}}
 ```
 
-Without Swarm, compose file secrets are bind mounts, and `secrets:` has no `:z` option. The target host has no SELinux, so no relabel is needed there; the file was read by container root at `/run/secrets/session_secret` (the entrypoint used it to derive the MCP bearer). On an SELinux-enforcing host the file would still need relabelling. `SESSION_SECRET_FILE` is read by the entrypoint and `scripts/sign-in-link.sh`; whether the server itself honours it depends on the server slice.
+Without Swarm, compose file secrets are bind mounts, and `secrets:` has no `:z` option. The target host has no SELinux, so no relabel is needed there; the file was read by container root at `/run/secrets/session_secret` (the entrypoint used it to derive the MCP bearer). On an SELinux-enforcing host the file would still need relabelling. `SESSION_SECRET_FILE` is read by the entrypoint and `scripts/sign-in-link.sh`; the server reads it too (`secret()` in `server/src/env.ts`).
 
 ## 7. Risks and open questions for Marc
 

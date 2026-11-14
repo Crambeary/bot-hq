@@ -63,8 +63,10 @@ COPY web ./web
 COPY scripts ./scripts
 RUN npm run build
 
-# Box scripts and the Chrome extension source live at /opt/hq (the server's desk.ts expects this path).
-COPY server/box /opt/hq
+# Box scripts and the Chrome extension source live at /opt/hq, laid out as desk.ts BOX_FILES says:
+# server/box/ext/* goes to /opt/hq/ext/src/* (hq-screen.py packs the CRX from there).
+COPY --exclude=ext server/box /opt/hq
+COPY server/box/ext /opt/hq/ext/src
 COPY docker/supervisord.conf /etc/supervisor/conf.d/hq.conf
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod 755 /entrypoint.sh /opt/hq/*.py /opt/hq/app/scripts/*.sh
