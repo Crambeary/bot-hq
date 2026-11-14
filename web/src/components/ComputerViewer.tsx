@@ -162,7 +162,8 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     setWakeError(null);
     if (running) setAttempt((n) => n + 1);
     else if (orgo) wake();
-    else setAttempt((n) => n + 1);
+    // Local: refresh the computer's state; once it reads running, the connection effect reconnects.
+    else useStore.getState().loadComputer().catch(() => {});
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});

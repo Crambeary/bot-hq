@@ -9,7 +9,11 @@ function secret(name: string, optional = false): string {
   const direct = process.env[name];
   if (direct) return direct;
   const file = process.env[`${name}_FILE`];
-  if (file) return fs.readFileSync(file, 'utf8').trim();
+  if (file) {
+    const value = fs.readFileSync(file, 'utf8').trim();
+    if (value || optional) return value;
+    throw new Error(`Empty env ${name}_FILE`);
+  }
   if (optional) return '';
   throw new Error(`Missing env ${name} (or ${name}_FILE)`);
 }

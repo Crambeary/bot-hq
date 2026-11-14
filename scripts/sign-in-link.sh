@@ -5,17 +5,18 @@
 # (or already have an account). The key it uses never leaves this machine.
 #
 # Where the session secret comes from (the secret itself is never printed):
-#   SESSION_SECRET_FILE   a file holding it (docker secret: /run/secrets/session_secret). Used first if set.
+#   SESSION_SECRET        from the environment, used first if nonempty (as server/src/env.ts does).
+#   SESSION_SECRET_FILE   a file holding it (docker secret: /run/secrets/session_secret).
 #   ENV_FILE              a dotenv file with SESSION_SECRET= (default /opt/hq/app/.env), the original behaviour.
 # Port: PORT from the environment, else PORT= in ENV_FILE, else 8787.
 set -euo pipefail
 email="${1:?usage: sign-in-link.sh <email>}"
 ENV_FILE="${ENV_FILE:-/opt/hq/app/.env}"
 val() { [ -r "$ENV_FILE" ] && grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true; }
-if [ -n "${SESSION_SECRET_FILE:-}" ]; then
+if [ -n "${SESSION_SECRET:-}" ] || [ -n "${SESSION_SECRET_FILE:-}" ]; then
   # HMAC computed in python so the secret is never on a command line or in the output.
   key="$(python3 -c 'import hmac, hashlib, os
-secret = open(os.environ["SESSION_SECRET_FILE"], encoding="utf-8").read().strip()
+secret = os.environ.get("SESSION_SECRET") or open(os.environ["SESSION_SECRET_FILE"], encoding="utf-8").read().strip()
 print(hmac.new(secret.encode(), b"owner-login", hashlib.sha256).hexdigest())')"
 else
   key="$(printf 'owner-login' | openssl dgst -sha256 -hmac "$(val SESSION_SECRET)" -r | cut -d' ' -f1)"

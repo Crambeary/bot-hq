@@ -127,14 +127,19 @@ export function bridge(client: WebSocket, upstream: net.Socket, mode: 'watch' | 
 }
 
 async function relay(client: WebSocket, userId: string, botId: string, mode: 'watch' | 'control') {
-  client.on('close', () => viewerClosed(userId));
+  // Both listeners go on before the first await: a viewer can close, or send a bad frame, during setup.
+  let closed = false;
+  client.on('close', () => { closed = true; viewerClosed(userId); });
+  client.on('error', () => { closed = true; });
   viewerOpened(userId); // counts watchers for the UI (see idle.ts)
   try {
     const { screenId } = await screenFor(userId, botId);
+    if (closed) return;
     // A screen nobody has used yet is bare; set it up while the person is already watching.
     readyScreen(userId, botId).catch(() => {});
     const upstream = net.connect({ host: '127.0.0.1', port: vncPortFor(screenId) });
     await new Promise<void>((res, rej) => { upstream.once('connect', () => res()); upstream.once('error', rej); });
+    if (closed) { upstream.destroy(); return; }
     bridge(client, upstream, mode);
   } catch (e: any) {
     console.warn('[vnc] relay failed', e?.message ?? e);

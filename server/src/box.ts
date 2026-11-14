@@ -20,6 +20,9 @@ function shellEnv(screenId?: string | null): NodeJS.ProcessEnv {
     USER: process.env.USER ?? 'root',
     LANG: process.env.LANG ?? 'C.UTF-8',
     DISPLAY: displayFor(screenId),
+    // hq-screen.py needs these two (supervisorctl for the home screen, no apt at run time); nothing else HQ_*.
+    ...(process.env.HQ_HOME_SUPERVISOR ? { HQ_HOME_SUPERVISOR: process.env.HQ_HOME_SUPERVISOR } : {}),
+    ...(process.env.HQ_NO_APT ? { HQ_NO_APT: process.env.HQ_NO_APT } : {}),
   };
 }
 

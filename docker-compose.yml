@@ -15,8 +15,9 @@ services:
       HQ_LOCAL: "1"
       HOST: "0.0.0.0"
       PORT: "8787"
-      APP_URL: "${APP_URL:-http://localhost:8787}"
-      SERVER_URL: "${APP_URL:-http://localhost:8787}"
+      # HQ_APP_URL, not APP_URL: compose reads ./.env, whose APP_URL is the Vite dev URL (:5173).
+      APP_URL: "${HQ_APP_URL:-http://localhost:8787}"
+      SERVER_URL: "${HQ_APP_URL:-http://localhost:8787}"
       DEV_LOGIN: "0"
       ALLOWED_EMAILS: "${ALLOWED_EMAILS:?set ALLOWED_EMAILS to the owner's email address}"
       DB_PATH: "/data/hq.db"

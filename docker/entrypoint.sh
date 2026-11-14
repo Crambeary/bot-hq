@@ -44,13 +44,14 @@ fi
 # HMAC-SHA256(SESSION_SECRET, "mcp:primary") (server/src/engine.ts mcpToken), computed from the secret
 # file without printing it. Editing config.yaml needs no running server; the entry is written
 # to a 0600 file under /run and add-hq-to-hermes.py is a no-op when nothing changed.
-if [ -n "${SESSION_SECRET_FILE:-}" ] && [ -r "$SESSION_SECRET_FILE" ]; then
+if [ -n "${SESSION_SECRET:-}" ] || { [ -n "${SESSION_SECRET_FILE:-}" ] && [ -r "$SESSION_SECRET_FILE" ]; }; then
   touch "$HERMES_HOME/config.yaml"
   entry=/run/hq/hermes-mcp-hq.yaml
   mkdir -p /run/hq
   (umask 077; HQ_MCP_URL="${MCP_BASE_URL:-http://127.0.0.1:${PORT:-8787}}/mcp/primary" python3 - >"$entry" <<'PY'
 import hashlib, hmac, os
-secret = open(os.environ["SESSION_SECRET_FILE"], encoding="utf-8").read().strip()
+# Same precedence as secret() in server/src/env.ts: SESSION_SECRET, then SESSION_SECRET_FILE.
+secret = os.environ.get("SESSION_SECRET") or open(os.environ["SESSION_SECRET_FILE"], encoding="utf-8").read().strip()
 token = hmac.new(secret.encode(), b"mcp:primary", hashlib.sha256).hexdigest()
 print("  hq:")
 print("    url: " + os.environ["HQ_MCP_URL"])

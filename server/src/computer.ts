@@ -116,8 +116,12 @@ async function lease(userId: string, botId: string): Promise<BotScreen> {
     if (!free) throw new Error(`Every screen on the computer is in use (${MAX_SCREENS} at most). Remove a bot to free one.`);
     screenId = free;
   }
-  const size = await probeDisplay(screenId);
+  // Reserve the screen before the first await so a concurrent lease sees it as taken.
+  db.prepare('INSERT OR REPLACE INTO screens(bot_id,user_id,screen_id,last_used_at) VALUES (?,?,?,?)').run(botId, userId, screenId, now());
+  let size: Awaited<ReturnType<typeof probeDisplay>>;
+  try { size = await probeDisplay(screenId); } catch (e) { db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId); throw e; }
   if (!size) {
+    db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId);
     const msg = `The desktop for ${screenId} (display ${displayFor(screenId)}) is not running. It is started with the container; check the supervisord logs.`;
     setStatus(userId, 'error', msg);
     throw new Error(msg);

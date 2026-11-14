@@ -163,7 +163,7 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
     }
   }
 
-  const cwd = env.localBox ? `/root/grokbot/files/${botId}` : path.join(home, 'workspace');
+  const cwd = env.localBox ? path.join(env.libRoot, botId) : path.join(home, 'workspace');
   fs.mkdirSync(cwd, { recursive: true });
 
   const cfgFile = path.join(home, 'config.yaml');
