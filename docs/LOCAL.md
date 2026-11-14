@@ -24,10 +24,10 @@ Legend: **Verified** = read in this repo, with `file:line`. **UNVERIFIED** = not
 | Health route is `/api/health`, not `/health` | Verified `server/src/index.ts:31` |
 | Session cookie is `secure` only for an https `APP_URL` | Verified `server/src/lib/auth.ts:17` |
 | Screens cap at 4 regardless of `MAX_BOTS` | Verified `server/src/computer.ts:17,48` |
-| How Hermes is installed (package, version) | UNVERIFIED (README.md only says a gateway with the API server enabled is required) |
-| Whether `hermes auth add openai-codex` / `anthropic --type oauth` use a localhost callback or device code | UNVERIFIED |
-| Box scripts work as non-root | UNVERIFIED (they assume `/root`, `/opt/hq`, `apt-get`) |
-| `hqlib` tolerates a missing dbus session | UNVERIFIED |
+| How Hermes is installed (package, version) | Resolved in Phase 1: NousResearch/hermes-agent v0.22.2 at commit `d923a5eb487a17c0a68801bba9ef0f56c81040a8`, installed by the project's own `scripts/install.sh` pinned to that commit (`Dockerfile`). It provisions its own uv, Python 3.14 and a hash-verified venv. Built and `hermes` 0.22.2 answers `/health` in the container. |
+| Whether `hermes auth add openai-codex` / `anthropic --type oauth` use a localhost callback or device code | Resolved by reading the pinned Hermes source in the image: Codex uses a device-code flow (`agent/credential_pool.py`, `_codex_device_code_login` in `hermes_cli/auth.py`); Anthropic redirects to Anthropic's hosted callback (`https://console.anthropic.com/oauth/code/callback`, `agent/anthropic_credentials.py`) and the code is pasted back. Neither needs a localhost callback port. Claude OAuth was run for real in Phase 1: `hermes auth add` stores the credential but does not select it, and with `model.provider` unset Hermes 0.22 answers every turn with `no_provider_configured`; the gateway also ignores a per-turn `provider`. The sign-in route therefore runs `hermes config set model.provider <provider>` after `auth add` (`server/src/routes-config.ts`). The screen viewer has no clipboard bridge, so a code cannot be pasted into the on-screen terminal yet (Phase 3); meanwhile run the same `hermes auth add` via `docker compose exec` in a host terminal. The first `hermes` CLI call after seeding finishes installing its Python dependencies once. |
+| Box scripts work as non-root | Not pursued: the container runs as root. As root, `hq-screen.py base`, `base-check` and `terminal` were run by hand on `:99` in the container and succeeded (policy files, extension CRX, terminal window). Runtime `apt-get` is disabled by `HQ_NO_APT=1`. |
+| `hqlib` tolerates a missing dbus session | Verified in `server/box/hqlib.py` (`session_bus` falls back to `private_bus`; `screen_env` only sets the address `if bus`). The container also runs a system bus and `dbus-launch` for XFCE. |
 | Web UI line refs in section 3 | From a repo search, spot-checked per file; re-check when implementing |
 
 ## 2. Architecture
@@ -96,7 +96,7 @@ Why `auth.json` persistence depends on the Hermes-home volumes: Codex/Claude OAu
 
 | File | Change |
 |---|---|
-| `hqlib.py` | Read `HQ_ROOT`, `HQ_LOGS`, `HQ_PROFILES`, `HQ_FILES` from env (defaults `/opt/hq`, `/var/log/hq`, `/root/grokbot/profiles`, `/root/grokbot/files`). Make the dbus-session requirement tolerant (UNVERIFIED). |
+| `hqlib.py` | Read `HQ_ROOT`, `HQ_LOGS`, `HQ_PROFILES`, `HQ_FILES` from env (defaults `/opt/hq`, `/var/log/hq`, `/root/grokbot/profiles`, `/root/grokbot/files`). `HQ_NO_APT=1` disables runtime apt; dbus handling needed no change. |
 | `hq-screen.py` | Same env-driven paths. In `do_base` (`hq-screen.py:327`), remove or no-op `install_packages()`, which runs `apt-get` at runtime; the Dockerfile owns packages. |
 | `hq-shell.py` | Same env-driven paths. |
 | `hq-home.py` | Same paths; stays on `127.0.0.1:7391`. |
@@ -230,8 +230,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 RUN apt-get update && apt-get install -y --no-install-recommends chromium \
  && rm -rf /var/lib/apt/lists/*
 
-# UNVERIFIED: install Hermes Agent here (method and pinned version unknown; the CLI must
-# be on PATH as `hermes`, or set HERMES_BIN). Do not bake any auth into the image.
+# Hermes Agent: installed with its own scripts/install.sh pinned to a commit (see the real Dockerfile).
+# The venv lives under HERMES_HOME, which a volume hides, so the image keeps a seed copy at
+# /opt/hermes-seed that the entrypoint copies into the volume. No auth is baked into the image.
 
 WORKDIR /opt/hq/app
 COPY package.json package-lock.json ./
@@ -250,7 +251,7 @@ ENTRYPOINT ["/entrypoint.sh"]
 CMD ["supervisord","-n","-c","/etc/supervisor/supervisord.conf"]
 ```
 
-Supervisord programs (priority order): `dbus` (system/session bus), `xvfb99` (`Xvfb :99 -screen 0 1440x900x24`), `desktop99` (`DISPLAY=:99 dbus-launch xfce4-session`), `x11vnc99` (`x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared`), `hq-home` (`python3 /opt/hq/hq-home.py`), `hermes` (primary gateway on 127.0.0.1:8642, command UNVERIFIED), `server` (`node ... server/src/index.ts`, env `HQ_LOCAL=1 HOST=0.0.0.0 PORT=8787`). Phase 2 adds per-display `xvfb/desktop/x11vnc` programs for `:100..` (or the allocator starts them). Server starts after Hermes is healthy.
+Supervisord programs (priority order): `dbus` (system/session bus), `xvfb99` (`Xvfb :99 -screen 0 1440x900x24`), `desktop99` (`DISPLAY=:99 dbus-launch xfce4-session`), `x11vnc99` (`x11vnc -display :99 -rfbport 5900 -localhost -nopw -forever -shared`), `hq-home` (`python3 /opt/hq/hq-home.py`), `hermes` (primary gateway on 127.0.0.1:8642, `hermes gateway run --no-supervise`), `server` (`node /opt/hq/app/server/dist/index.js`, env `HQ_LOCAL=1 HOST=0.0.0.0 PORT=8787`). Phase 2 adds per-display `xvfb/desktop/x11vnc` programs for `:100..` (or the allocator starts them). Server starts after Hermes is healthy.
 
 ```yaml
 # docker-compose.yml
@@ -296,18 +297,18 @@ secrets:
 volumes: {hq-data: {}, hermes-primary: {}, hq-engines: {}, hq-grokbot: {}, hq-logs: {}}
 ```
 
-Without Swarm, compose file secrets are bind mounts, and `secrets:` has no `:z` option. On this SELinux-enforcing host, confirm the container can read the file by checking that the server starts. If it can't, relabel the host file for containers (for example `chcon -t container_file_t ./secrets/session_secret`). This is UNVERIFIED. `SESSION_SECRET_FILE` is a proposed env var; it does not exist today.
+Without Swarm, compose file secrets are bind mounts, and `secrets:` has no `:z` option. The target host has no SELinux, so no relabel is needed there; the file was read by container root at `/run/secrets/session_secret` (the entrypoint used it to derive the MCP bearer). On an SELinux-enforcing host the file would still need relabelling. `SESSION_SECRET_FILE` is read by the entrypoint and `scripts/sign-in-link.sh`; the server reads it too (`secret()` in `server/src/env.ts`).
 
 ## 7. Risks and open questions for Marc
 
-1. **Hermes install method and version.** Not in this repo (README.md only says gateway + `API_SERVER_KEY` in `~/.hermes/.env`). Need the exact install command, version pin, and whether `hermes gateway run --no-supervise` and `hermes auth add` behave the same in a container. Blocks Phase 1.
-2. **OAuth callback vs device code.** If `hermes auth add openai-codex` / `anthropic --type oauth` use a localhost redirect, the browser inside the container on the bot's screen can receive it (same network namespace), which should work but is UNVERIFIED. If the provider insists on a fixed callback port, check it does not collide with container ports.
+1. **Hermes install method and version.** Resolved: pinned `install.sh` at commit `d923a5e` (v0.22.2). `hermes gateway run --no-supervise` runs under supervisord and its API server answers `/health`. `hermes auth add` was not exercised (needs a real account).
+2. **OAuth callback vs device code.** Resolved from source: Codex is device-code, Anthropic uses a hosted callback with a pasted code. No localhost callback port is involved.
 3. **Chrome vs Chromium.** Box scripts find both and set Chrome policy under `/etc/opt/chrome/policies/managed` (and `/etc/chromium/...` if present) plus a CRX packed with openssl. Chromium from Debian is simpler; Google Chrome needs its apt repo and is amd64 only. Pick one and test the extension policy.
 4. **XFCE weight.** The scripts need `xfce4-panel`/`xfdesktop`/`xfsettingsd`/`xfconf-query` (panel hiding needs xfconf). A lighter shell (openbox + xsetroot) would degrade some dressing. Accept XFCE per display (roughly a few hundred MB RAM each) or invest in a lighter path?
 5. **Root vs non-root.** Scripts assume `HOME=/root`, `/opt/hq`, `/var/log/hq`, `/root/grokbot`, and runtime `apt-get`. Root in the container is simplest and bots get root anyway; non-root would need path rework. Default: root.
 6. **Bots are not isolated from each other.** One container, one uid: any bot can drive another's Chrome over CDP, read its profile, and read all `auth.json`. If that is unacceptable, the only real fix is one container per bot (large redesign).
 7. **MAX_BOTS vs RAM.** Each bot costs Xvfb + XFCE + x11vnc + Chrome + a Hermes gateway. Screens hard-cap at 4 (`server/src/computer.ts:17`) regardless of `MAX_BOTS`. Suggest `MAX_BOTS=2` to start; measure.
-8. **dbus session.** XFCE and xfconf need a session bus per display; whether `hqlib` tolerates one missing is UNVERIFIED. Plan: `dbus-launch` per desktop program.
+8. **dbus session.** XFCE and xfconf need a session bus per display; `hqlib` tolerates one missing (falls back to a private bus). The desktop program runs `dbus-launch`.
 9. **`/dev/shm` and GPU.** Chrome gets `--disable-dev-shm-usage`, but `shm_size` is set anyway. No GPU; software rendering only.
 10. **Health path.** The route is `/api/health`; the `/health` the task hinted at does not exist (`server/src/index.ts:31`). Sketches use `/api/health`. The Hermes gateway has its own `/health` (`server/src/engine.ts:216`).
 11. **Stale docs to update later (not in this change).** `README.md:7-8,103-131,181-190` (Orgo install, Composio/xAI claims), `docs/ARCHITECTURE.md` (Orgo/Composio surfaces; `/root/grokbot` paths around 71-79), `docs/orgo-builder-guide.md`, `docs/xai-and-composio.md`. Add a pointer to this file from README.

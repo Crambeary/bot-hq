@@ -116,15 +116,7 @@ def home_alive():
     return pid.isdigit() and hqlib.alive(int(pid)) and any('hq-home.py' in a for a in hqlib.cmdline(int(pid)))
 
 
-def start_home(restart=False):
-    if restart:
-        hqlib.stop_pids([p for p in hqlib.all_pids() if any(a.endswith('hq-home.py') for a in hqlib.cmdline(p))], grace=2)
-    elif home_alive():
-        return True
-    env = hqlib.base_env(99)
-    for key in ('HQ_SCREEN', 'DISPLAY', 'GTK_THEME'):
-        env.pop(key, None)
-    hqlib.spawn([sys.executable, ROOT + '/hq-home.py'], env, 'home')
+def _home_healthy():
     end = time.time() + 8
     while time.time() < end:
         try:
@@ -133,6 +125,35 @@ def start_home(restart=False):
         except Exception:
             time.sleep(0.2)
     return False
+
+
+def _supervised_home(action):
+    """When a supervisor owns hq-home (HQ_HOME_SUPERVISOR=<its program name>), ask it instead of spawning a
+    second copy that would fight the first for the port. Returns None when no supervisor is in charge."""
+    name = os.environ.get('HQ_HOME_SUPERVISOR')
+    if not name or not shutil.which('supervisorctl'):
+        return None
+    code, _ = hqlib.run(['supervisorctl', action, name], timeout=30)
+    return code == 0 and _home_healthy()
+
+
+def start_home(restart=False):
+    if restart:
+        supervised = _supervised_home('restart')
+        if supervised is not None:
+            return supervised
+        hqlib.stop_pids([p for p in hqlib.all_pids() if any(a.endswith('hq-home.py') for a in hqlib.cmdline(p))], grace=2)
+    elif home_alive():
+        return True
+    else:
+        supervised = _supervised_home('start')
+        if supervised is not None:
+            return supervised
+    env = hqlib.base_env(99)
+    for key in ('HQ_SCREEN', 'DISPLAY', 'GTK_THEME'):
+        env.pop(key, None)
+    hqlib.spawn([sys.executable, ROOT + '/hq-home.py'], env, 'home')
+    return _home_healthy()
 
 
 def gtk_works():
@@ -169,6 +190,10 @@ def missing_packages():
 def install_packages(warnings):
     want = missing_packages()
     if not want:
+        return []
+    if os.environ.get('HQ_NO_APT') == '1':
+        # The image owns its packages (the Dockerfile); never apt-get at run time.
+        warnings.append('missing packages (not installing, HQ_NO_APT=1): %s' % ' '.join(want))
         return []
     if not shutil.which('apt-get'):
         warnings.append('missing packages and no apt on this computer: %s' % ' '.join(want))

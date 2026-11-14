@@ -10,7 +10,6 @@ import { env } from './env.js';
 import { emitBot, getBotRow, listRoutines, listTasks } from './store.js';
 import { computerState, readyScreen, resetBotScreen } from './computer.js';
 import { box } from './box.js';
-import { orgo } from './orgo.js';
 import { openTerminal } from './desk.js';
 import { engineHome, engineInfo, engineKind, forgetEngineOptions, restartEngine, stopOwnScreen } from './engine.js';
 import { listMemories } from './engine-memory.js';
@@ -146,12 +145,16 @@ configApi.post('/bots/:id/engine/login', async (c) => {
   const home = engineHome(b.id);
   if (!home) return c.json({ error: 'This bot has no agent.' }, 409);
   // The agent's files are on the machine this server runs on; a terminal on another machine cannot reach them.
-  if (!box.local) return c.json({ error: 'Sign-in opens a terminal on the computer. It works once the app runs on that computer.' }, 409);
   const { provider } = await c.req.json<{ provider?: string }>().catch(() => ({} as { provider?: string }));
   if (provider !== undefined && !/^[a-z0-9][a-z0-9._-]{0,40}$/.test(provider)) return c.json({ error: 'bad provider' }, 400);
   const hermes = `HERMES_HOME=${box.quote(home)} ${box.quote(env.hermesBin)}`;
   // Claude subscriptions sign in with OAuth; without the flag Hermes asks for an API key.
-  const cmd = !provider ? `${hermes} model` : `${hermes} auth add ${provider}${provider === 'anthropic' ? ' --type oauth' : ''}`;
+  // `auth add` only stores the credential; with model.provider unset ("auto"), Hermes 0.22 never falls
+  // back to it, so turns fail with no_provider_configured. Make the provider just signed in to the
+  // default. The gateway ignores a per-turn provider, so this config value is what counts.
+  const cmd = !provider
+    ? `${hermes} model`
+    : `${hermes} auth add ${provider}${provider === 'anthropic' ? ' --type oauth' : ''} && ${hermes} config set model.provider ${provider}`;
   try {
     const s = await readyScreen(user.id, b.id);
     await openTerminal(s.screenId, cmd, provider ? `Sign in: ${provider}` : 'Choose a model');
@@ -196,9 +199,9 @@ configApi.post('/bots/:id/handback', (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- library: files under /root/grokbot/files/<botId> on the bot's computer ----------
+// ---------- library: files under env.libRoot/<botId> on the local computer ----------
 
-const LIB_ROOT = '/root/grokbot/files';
+const LIB_ROOT = env.libRoot;
 
 function safeRel(p: string | undefined): string | null {
   const rel = (p ?? '').replace(/^\/+|\/+$/g, '');
@@ -230,9 +233,13 @@ configApi.get('/bots/:id/files', async (c) => {
   const rel = safeRel(c.req.query('path'));
   if (rel === null) return c.json({ error: 'bad path' }, 400);
   try {
-    if (!box.local && computerState(user.id).status !== 'running') return c.json({ status: 'asleep', path: rel, files: [] });
     const dir = `${LIB_ROOT}/${b.id}${rel ? `/${rel}` : ''}`;
-    const r = await box.bash(`mkdir -p ${shq(`${LIB_ROOT}/${b.id}`)} && ls -la --time-style=+%s ${shq(dir)} 2>&1`, 30);
+    await fs.promises.mkdir(`${LIB_ROOT}/${b.id}`, { recursive: true });
+    // Follow links before listing, so a link inside the library cannot point outside it.
+    const real = await fs.promises.realpath(dir).catch(() => null);
+    const base = await fs.promises.realpath(`${LIB_ROOT}/${b.id}`);
+    if (real !== null && real !== base && !real.startsWith(base + '/')) return c.json({ status: 'error', path: rel, files: [], error: 'outside the library' });
+    const r = await box.bash(`ls -la --time-style=+%s ${shq(dir)} 2>&1`, 30);
     if (r.exit_code !== 0) return c.json({ status: 'error', path: rel, files: [], error: (r.output ?? '').slice(0, 300) });
     return c.json({ status: 'ok', path: rel, files: parseLs(r.output ?? '') });
   } catch (e: any) {
@@ -247,22 +254,13 @@ configApi.post('/bots/:id/files/download', async (c) => {
   const { path } = await c.req.json<{ path: string }>().catch(() => ({ path: '' }));
   const rel = safeRel(path);
   if (!rel) return c.json({ error: 'bad path' }, 400);
-  // On the computer itself the file is on our own disk: serve it directly.
-  if (box.local) return c.json({ url: `/api/bots/${b.id}/files/raw?path=${encodeURIComponent(rel)}` });
-  try {
-    if (!env.orgoComputerId) return c.json({ error: 'computer unavailable' }, 409);
-    const r: any = await orgo.exportFile(env.orgoComputerId, `${LIB_ROOT}/${b.id}/${rel}`);
-    const url = r?.url ?? r?.file?.url ?? r?.download_url;
-    if (!url) return c.json({ error: 'export returned no link' }, 502);
-    return c.json({ url });
-  } catch (e: any) {
-    return c.json({ error: String(e?.message ?? e).slice(0, 300) }, 502);
-  }
+  // The file is on our own disk: serve it directly.
+  return c.json({ url: `/api/bots/${b.id}/files/raw?path=${encodeURIComponent(rel)}` });
 });
 
 configApi.get('/bots/:id/files/raw', (c) => {
   const b = ownBot(c.get('user').id, c.req.param('id'));
-  if (!b || !box.local) return c.json({ error: 'not found' }, 404);
+  if (!b) return c.json({ error: 'not found' }, 404);
   const rel = safeRel(c.req.query('path'));
   if (!rel) return c.json({ error: 'bad path' }, 400);
   const root = `${LIB_ROOT}/${b.id}`;

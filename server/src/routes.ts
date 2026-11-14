@@ -2,16 +2,16 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { db, now } from './db.js';
-import { env } from './env.js';
+import { env, features } from './env.js';
 import { newId } from './lib/ids.js';
 import { hub } from './lib/hub.js';
 import { createSession, destroySession, isOwnerKey, requireUser, userFromCookieHeader, type AuthVars } from './lib/auth.js';
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
 import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
+import { box } from './box.js';
 import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
-import { orgo } from './orgo.js';
 import { catalog, connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin, toolkitInfo } from './composio.js';
 import { runRoutine, scheduleRoutine, unscheduleRoutine } from './routines.js';
 import { deleteEventTrigger } from './triggers.js';
@@ -62,12 +62,22 @@ function findOrCreateUser(email: string, name?: string, preferId?: string) {
 
 // ---------- auth ----------
 
+const devLogin = env.devLogin && env.allowedEmails.length > 0;
+if (env.devLogin && !devLogin) console.warn('[auth] DEV_LOGIN disabled: ALLOWED_EMAILS is empty');
+api.use('*', async (c, next) => {
+  const path = c.req.path;
+  if ((!features.composio && (path === '/api/apps' || path.startsWith('/api/apps/'))) ||
+      (!features.voice && (path === '/api/voice' || path.startsWith('/api/voice/')))) return c.json({ error: 'disabled' }, 503);
+  await next();
+});
+
 api.get('/auth/me', (c) => {
   const user = userFromCookieHeader(c.req.header('cookie'));
-  return c.json({ user, devLogin: env.devLogin });
+  return c.json({ user, devLogin, features });
 });
 
 api.get('/auth/google/start', async (c) => {
+  if (!features.composio) return c.json({ error: 'disabled' }, 503);
   const attemptId = newId('login');
   const provisional = newId('usr');
   const cb = `${env.serverUrl}/api/auth/google/callback?attempt=${attemptId}`;
@@ -77,6 +87,7 @@ api.get('/auth/google/start', async (c) => {
 });
 
 api.get('/auth/google/callback', async (c) => {
+  if (!features.composio) return c.json({ error: 'disabled' }, 503);
   const attempt = db.prepare('SELECT * FROM login_attempts WHERE id=?').get(c.req.query('attempt') ?? '') as any;
   const caId = c.req.query('connected_account_id') ?? attempt?.connected_account_id;
   if (!attempt || c.req.query('status') === 'failed' || !caId) return c.redirect(`${env.appUrl}/?login=failed`);
@@ -96,7 +107,10 @@ api.get('/auth/google/callback', async (c) => {
 });
 
 api.post('/auth/dev', async (c) => {
-  if (!env.devLogin) return c.json({ error: 'disabled' }, 403);
+  if (!devLogin) return c.json({ error: 'disabled' }, 403);
+  const app = new URL(env.appUrl);
+  const origin = c.req.header('origin');
+  if (origin ? origin !== app.origin : c.req.header('host') !== app.host) return c.json({ error: 'forbidden' }, 403);
   const { email, name } = await c.req.json<{ email: string; name?: string }>();
   if (!email?.includes('@')) return c.json({ error: 'email required' }, 400);
   try {
@@ -390,11 +404,11 @@ api.get('/bots/:id/screenshot', async (c) => {
   const b = ownBot(user.id, c.req.param('id'));
   if (!b) return c.json({ error: 'not found' }, 404);
   const scr = db.prepare('SELECT screen_id FROM screens WHERE bot_id=?').get(b.id) as any;
-  if (!env.orgoComputerId || computerState(user.id).status !== 'running' || !scr) return c.body(null, 204);
+  if (computerState(user.id).status !== 'running' || !scr) return c.body(null, 204);
   try {
-    const s = await orgo.screenshot(env.orgoComputerId, scr.screen_id);
-    const b64 = s.image.replace(/^data:[^,]+,/, '');
-    return c.body(Buffer.from(b64, 'base64'), 200, { 'Content-Type': s.mime_type ?? 'image/jpeg', 'Cache-Control': 'no-store' });
+    const png = await box.screenshot(scr.screen_id);
+    if (!png) return c.body(null, 204);
+    return c.body(png, 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
   } catch {
     return c.body(null, 204);
   }

@@ -79,7 +79,7 @@ export function CreateBotModal() {
           <div className="mode-pick" role="radiogroup" aria-label="Bot type">
             <button type="button" role="radio" aria-checked={mode === 'personal'} className={`mode-pick__opt${mode === 'personal' ? ' is-active' : ''}`} onClick={() => setMode('personal')}>
               <span className="mode-pick__title">Personal assistant</span>
-              <span className="mode-pick__sub">Works for you, with your apps</span>
+<span className="mode-pick__sub">Works for you, handling the tasks you assign</span>
             </button>
             <button type="button" role="radio" aria-checked={mode === 'teammate'} className={`mode-pick__opt${mode === 'teammate' ? ' is-active' : ''}`} onClick={() => setMode('teammate')}>
               <span className="mode-pick__title">Teammate</span>

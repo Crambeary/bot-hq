@@ -5,7 +5,7 @@
 import { Hono } from 'hono';
 import OpenAI from 'openai';
 import { db, now } from './db.js';
-import { env } from './env.js';
+import { env, features } from './env.js';
 import { newId } from './lib/ids.js';
 import type { AuthVars } from './lib/auth.js';
 import { appendRow, emitBot, getBotRow, getLive, listRoutines, listTasks, updateRow } from './store.js';
@@ -15,6 +15,10 @@ import type { ActivityKind, EventBody, MessageBody, RowBody, VoiceCallRecord, Vo
 import { listMemories } from './engine-memory.js';
 
 export const voiceApi = new Hono<AuthVars>();
+voiceApi.use('*', async (c, next) => {
+  if (!features.voice) return c.json({ error: 'disabled' }, 503);
+  await next();
+});
 
 const XAI = 'https://api.x.ai/v1';
 const VOICE_MODEL = process.env.XAI_VOICE_MODEL ?? 'grok-voice-latest';
@@ -357,12 +361,16 @@ voiceApi.post('/tool', async (c) => {
   }
 });
 
-const xai = new OpenAI({ apiKey: env.xaiKey, baseURL: XAI, timeout: 45_000 });
+let xai: OpenAI | undefined;
+function getXai(): OpenAI {
+  if (!features.voice) throw new Error('Voice is disabled');
+  return xai ??= new OpenAI({ apiKey: env.xaiKey, baseURL: XAI, timeout: 45_000 });
+}
 
 async function summarizeCall(botName: string, transcript: { role: string; text: string }[], tasks: string[]): Promise<string | null> {
   if (!transcript.length && !tasks.length) return null;
   const lines = transcript.map((t) => `${t.role === 'user' ? 'User' : botName}: ${t.text}`).join('\n').slice(-12_000);
-  const res: any = await xai.responses.create({
+  const res: any = await getXai().responses.create({
     model: env.xaiModel,
     reasoning: { effort: 'low' },
     store: false,

@@ -104,7 +104,7 @@ export function assignEngine(botId: string): EngineKind {
 /** Model credentials a managed agent may inherit from the primary agent. Never messaging tokens. */
 const SHARED_ENV = [
   'ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN',
-  'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENROUTER_API_KEY', 'XAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'NOUS_API_KEY',
+  'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'NOUS_API_KEY',
   'FIRECRAWL_API_KEY', 'TAVILY_API_KEY', 'EXA_API_KEY', 'PARALLEL_API_KEY',
 ];
 
@@ -163,7 +163,7 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
     }
   }
 
-  const cwd = env.localBox ? `/root/grokbot/files/${botId}` : path.join(home, 'workspace');
+  const cwd = env.localBox ? path.join(env.libRoot, botId) : path.join(home, 'workspace');
   fs.mkdirSync(cwd, { recursive: true });
 
   const cfgFile = path.join(home, 'config.yaml');

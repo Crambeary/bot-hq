@@ -34,6 +34,7 @@ interface ScreenProps {
  */
 export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paused = false, onExpand, onModeChange }: ScreenProps) {
   const computer = useStore((s) => s.computer);
+  const orgo = useStore((s) => s.features.orgo);
   const frameRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFBType | null>(null);
@@ -72,9 +73,9 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
 
   // Opening the large view is a request to see the computer, so wake it without another click.
   useEffect(() => {
-    if (variant !== 'stage' || autoWoke.current || !computer) return;
+    if (!orgo || variant !== 'stage' || autoWoke.current || !computer) return;
     if (status === 'suspended' || status === 'stopped' || status === 'absent') { autoWoke.current = true; wake(); }
-  }, [variant, computer, status, wake]);
+  }, [orgo, variant, computer, status, wake]);
 
   useEffect(() => {
     const on = () => setVisible(document.visibilityState === 'visible');
@@ -147,7 +148,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   let phase: Phase;
   if (paused) phase = 'paused';
   else if (status === 'error' || wakeError) phase = 'error';
-  else if (!running) phase = busy || waking ? 'waking' : 'asleep';
+  else if (!running) phase = busy || waking || !orgo ? 'waking' : 'asleep';
   else if (!opened && !hasScreen) phase = 'idle';
   else if (conn === 'error' || conn === 'disconnected') phase = 'error';
   else if (conn === 'connected') phase = 'live';
@@ -160,7 +161,9 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   const retry = () => {
     setWakeError(null);
     if (running) setAttempt((n) => n + 1);
-    else wake();
+    else if (orgo) wake();
+    // Local: refresh the computer's state; once it reads running, the connection effect reconnects.
+    else useStore.getState().loadComputer().catch(() => {});
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -202,7 +205,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
             <div className="screen__state is-waking" role="status">
               <span className="screen__sweep" aria-hidden />
               <span className="screen__mascot is-bobbing"><BotAvatarFor bot={bot} size={mascot} /></span>
-              <span className="screen__label">Waking {bot.name}’s computer…</span>
+              <span className="screen__label">{orgo ? `Waking ${bot.name}’s computer…` : `Starting ${bot.name}’s screen…`}</span>
             </div>
           )}
           {phase === 'switching' && (
@@ -210,7 +213,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
               <span className="screen__text">One moment…</span>
             </div>
           )}
-          {phase === 'asleep' && (
+          {orgo && phase === 'asleep' && (
             <div className="screen__state">
               <span className="screen__mascot is-asleep"><BotAvatarFor bot={bot} size={mascot} /></span>
               <span className="screen__text">{status === 'suspending' ? 'Going to sleep…' : `${bot.name}’s computer is asleep`}</span>
@@ -234,7 +237,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
           {phase === 'error' && (
             <div className="screen__state" role="alert">
               <span className="screen__text">
-                {!running ? `Couldn’t wake ${bot.name}’s computer` : conn === 'disconnected' ? 'The screen disconnected' : `Couldn’t reach ${bot.name}’s screen`}
+                {!running && orgo ? `Couldn’t wake ${bot.name}’s computer` : conn === 'disconnected' ? 'The screen disconnected' : `Couldn’t reach ${bot.name}’s screen`}
               </span>
               {(wakeError || (status === 'error' && computer?.error)) && <span className="screen__sub">{wakeError ?? computer?.error}</span>}
               {running && screensFull(computer, bot.id) && <span className="screen__sub">All {computer?.maxScreens} screens are in use. Reset one in Settings to free it.</span>}
@@ -335,7 +338,7 @@ export function ComputerViewer() {
         <div className="viewer__title">
           <BotAvatarFor bot={bot} size={24} />
           <span>{bot.name}’s computer</span>
-          <span className="viewer__status">{computerStatusText(computer)}</span>
+          <span className="viewer__status">{computerStatusText(computer, useStore.getState().features.orgo)}</span>
         </div>
         <button type="button" className="viewer__close" onClick={close} aria-label="Close computer"><Icon name="close" color="#FFFFFF" /></button>
       </div>

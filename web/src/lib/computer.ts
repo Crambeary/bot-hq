@@ -1,6 +1,7 @@
 import type { ComputerState } from '@shared/types';
 
-export function computerStatusText(c: ComputerState | null): string {
+export function computerStatusText(c: ComputerState | null, orgo = true): string {
+  if (!orgo) return c?.status === 'error' ? 'Unreachable' : c?.status === 'running' ? 'On' : 'Starting';
   switch (c?.status) {
     case 'running': return 'Awake';
     case 'starting': case 'resuming': return 'Waking up…';

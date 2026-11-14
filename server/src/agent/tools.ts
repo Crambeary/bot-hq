@@ -2,7 +2,7 @@ import { db, now } from '../db.js';
 import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
 import { box } from '../box.js';
-import { env } from '../env.js';
+import { env, features } from '../env.js';
 import { appendRow, getBotRow, listRoutines, toRoutine, describeCron } from '../store.js';
 import { executeComposio, innerToolSlugs, isReadOnlySlug, toolkitInfo } from '../composio.js';
 import { scheduleRoutine, unscheduleRoutine } from '../routines.js';
@@ -87,12 +87,12 @@ async function xSearch(a: any): Promise<string> {
 }
 
 /** Where each bot's Library lives on the shared computer. */
-export const LIBRARY_ROOT = '/root/grokbot/files';
+export const LIBRARY_ROOT = env.libRoot;
 
 export const TOOLS: ToolDef[] = [
   {
     name: 'save_file',
-    description: "Save a finished deliverable (report, notes, CSV, code, markdown) to your Library so the user can open and download it. Saved under /root/grokbot/files/<your id>/ on your computer. Files you write into that folder yourself show up in the Library too.",
+    description: `Save a finished deliverable (report, notes, CSV, code, markdown) to your Library so the user can open and download it. Saved under ${LIBRARY_ROOT}/<your id>/ on your computer. Files you write into that folder yourself show up in the Library too.`,
     parameters: obj({ filename: { type: 'string', description: 'e.g. briefing-2026-11-09.md' }, content: { type: 'string' } }, ['filename', 'content']),
     activity: 'drafting_file',
     label: 'Saving a file',
@@ -326,6 +326,11 @@ export const TOOLS: ToolDef[] = [
 ];
 
 export const toolMap = new Map(TOOLS.map((t) => [t.name, t]));
+
+export function enabledTools() {
+  const composioOnly = new Set(['request_app_connection', 'list_event_triggers', 'create_event_routine']);
+  return TOOLS.filter((t) => (features.composio || !composioOnly.has(t.name)) && (features.xai || t.name !== 'x_search'));
+}
 
 // ---------- approvals policy ----------
 

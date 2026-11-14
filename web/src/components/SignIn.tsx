@@ -6,6 +6,8 @@ import { TrafficLights } from './Sidebar';
 
 export function SignIn() {
   const devLogin = useStore((s) => s.devLogin);
+  const composio = useStore((s) => s.features.composio);
+  const xai = useStore((s) => s.features.xai);
   const checkAuth = useStore((s) => s.checkAuth);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
@@ -28,9 +30,7 @@ export function SignIn() {
         </div>
         <h1 className="signin__title">Grokbot</h1>
         <p className="signin__sub">AI teammates with their own computers. Hand them a task and they get it done.</p>
-        <a className="btn btn--primary signin__google" href="/api/auth/google/start">
-          <GoogleG /> Sign in with Google
-        </a>
+        {composio && <a className="btn btn--primary signin__google" href="/api/auth/google/start"><GoogleG /> Sign in with Google</a>}
         {devLogin && (
           <form className="signin__dev" onSubmit={dev}>
             <div className="signin__divider"><span>Dev sign-in</span></div>
@@ -39,8 +39,9 @@ export function SignIn() {
             <button type="submit" className="btn btn--secondary" disabled={busy}>{busy ? 'Signing in…' : 'Continue with email'}</button>
           </form>
         )}
+        {!composio && !devLogin && <p className="signin__sub">Ask the owner for a sign-in link (scripts/sign-in-link.sh).</p>}
         {error && <div className="card__error signin__error">{error}</div>}
-        <p className="signin__foot">Open source. Not affiliated with xAI.</p>
+        {xai && <p className="signin__foot">Open source. Not affiliated with xAI.</p>}
       </div>
     </div>
   );

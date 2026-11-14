@@ -9,6 +9,7 @@ import { formatBytes } from './ui';
 
 /** Files the bot saved under /root/grokbot/files/<botId> on its computer. */
 export function LibraryTab({ bot }: { bot: Bot }) {
+  const orgo = useStore((s) => s.features.orgo);
   const awake = useStore((s) => s.computer?.status === 'running');
   const [path, setPath] = useState('');
   const [list, setList] = useState<LibraryListing | null>(null);
@@ -62,11 +63,13 @@ export function LibraryTab({ bot }: { bot: Bot }) {
           </button>
         </div>
         <div className="panel-card">
-          {list?.status === 'asleep' ? (
+          {orgo && list?.status === 'asleep' ? (
             <div className="lib-empty">
               <div>{bot.name}’s computer is asleep. Wake it to see saved files.</div>
               <button type="button" className="cfg-btn cfg-btn--secondary" onClick={() => load(true)} disabled={loading}>{loading ? 'Waking…' : 'Wake and show files'}</button>
             </div>
+          ) : !orgo && list?.status === 'asleep' ? (
+            <div className="panel-empty">The local computer is starting. Try refreshing in a moment.</div>
           ) : !list && loading ? (
             <div className="panel-empty">Looking for files…</div>
           ) : list?.status === 'error' ? (
