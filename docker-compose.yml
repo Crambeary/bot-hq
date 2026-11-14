@@ -1,0 +1,51 @@
+# bot-hq, fully local, in one container. See docs/LOCAL.md.
+#   mkdir -p secrets && openssl rand -hex 32 > secrets/session_secret     (never printed or committed)
+#   ALLOWED_EMAILS=you@example.com docker compose up -d --build
+# No bind-mount relabel suffixes (:z/:Z): the host this was written for has no SELinux and they break it.
+# No docker.sock, no host home mounts, no privileged, no host network.
+services:
+  hq:
+    build: .
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8787:8787"
+    shm_size: "2gb"
+    environment:
+      HQ_LOCAL: "1"
+      HOST: "0.0.0.0"
+      PORT: "8787"
+      APP_URL: "${APP_URL:-http://localhost:8787}"
+      SERVER_URL: "${APP_URL:-http://localhost:8787}"
+      DEV_LOGIN: "0"
+      ALLOWED_EMAILS: "${ALLOWED_EMAILS:?set ALLOWED_EMAILS to the owner's email address}"
+      DB_PATH: "/data/hq.db"
+      HERMES_HOME_PRIMARY: "/root/.hermes"
+      ENGINES_DIR: "/data/engines"
+      MAX_BOTS: "${MAX_BOTS:-2}"
+      SESSION_SECRET_FILE: "/run/secrets/session_secret"
+    secrets:
+      - session_secret
+    volumes:
+      - hq-data:/data
+      - hermes-primary:/root/.hermes
+      - hq-engines:/data/engines
+      - hq-grokbot:/root/grokbot
+      - hq-logs:/var/log/hq
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/api/health"]
+      interval: 15s
+      timeout: 3s
+      start_period: 60s
+      retries: 5
+
+secrets:
+  session_secret:
+    file: ./secrets/session_secret
+
+volumes:
+  hq-data: {}
+  hermes-primary: {}
+  hq-engines: {}
+  hq-grokbot: {}
+  hq-logs: {}
