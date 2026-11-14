@@ -63,4 +63,5 @@ export const env = {
   maxBots: Number(process.env.MAX_BOTS ?? 4),
   /** Comma-separated emails allowed to sign in; empty = anyone who can reach the app. */
   allowedEmails: (process.env.ALLOWED_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+  libRoot: process.env.LIB_ROOT ?? '/root/grokbot/files',
 };

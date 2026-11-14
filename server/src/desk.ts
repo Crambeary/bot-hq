@@ -10,7 +10,7 @@ import { box, displayFor } from './box.js';
  *
  * The work on the computer is done by the scripts in server/box/, which this file installs under
  * /opt/hq and then calls with one short command per action. Only `box.*` is used to reach the
- * computer, so it works the same through Orgo's API and with HQ_LOCAL=1.
+ * computer, so it runs on the local machine.
  */
 
 export interface DeskBot { id: string; name: string; label: string; avatarShape: string; avatarColor: string }
@@ -104,32 +104,10 @@ async function setupBase(): Promise<void> {
   const b = bundle();
   const check = await script(['base-check', b.hash]);
   if (check.kind === 'BASE_OK') return;
-  // The scripts are missing or changed: send them over in one piece and unpack.
-  const packed = gzipSync(Buffer.from(JSON.stringify({ files: b.files }), 'utf8'));
-  await box.writeFile(`${ROOT}/bundle.json.gz`, packed);
-  const unpack = [
-    'import gzip, json, os',
-    `root = ${JSON.stringify(ROOT)}`,
-    "files = json.load(gzip.open(root + '/bundle.json.gz', 'rt', encoding='utf-8'))['files']",
-    'for rel, text in files.items():',
-    '    path = os.path.join(root, rel)',
-    '    os.makedirs(os.path.dirname(path), exist_ok=True)',
-    "    with open(path + '.new', 'w', encoding='utf-8') as f:",
-    '        f.write(text)',
-    "    os.chmod(path + '.new', 0o755 if rel.endswith('.py') else 0o644)",
-    "    os.replace(path + '.new', path)",
-    "src = root + '/ext/src'",
-    'for name in os.listdir(src):',
-    "    if 'ext/src/' + name not in files:",
-    '        os.unlink(os.path.join(src, name))',
-    "os.unlink(root + '/bundle.json.gz')",
-    "print('HQ_UNPACKED')",
-  ].join('\n');
-  const r = await box.bash(`python3 -c ${box.quote(unpack)} 2>&1`, 60);
-  if (!r.output.includes('HQ_UNPACKED')) {
-    throw new Error(`could not install the desktop scripts on the computer (python3 is needed): ${r.output.trim().slice(-300)}`);
+  // The scripts are baked into the image at /opt/hq; nothing is installed at runtime.
+  if (!fs.existsSync(`${ROOT}/hqlib.py`)) {
+    throw new Error(`the desktop scripts are missing: ${ROOT}/hqlib.py was not found (they are baked into the image at ${ROOT})`);
   }
-  // Package installs can take a while on a fresh computer.
   await finish(await script(['base', b.hash]), 'computer setup', 900);
 }
 
@@ -356,7 +334,7 @@ export function resetScreen(bot: DeskBot, screenId: string, opts?: { manageChrom
   return inTurn(screenId, () => dress(bot, screenId, opts?.manageChrome !== false, 'x', `resetting screen ${screenId}`));
 }
 
-/** The bot is gone: stop its Chrome, dock and anything else we started for that screen (do not delete the Orgo screen itself, and leave the profile dir). */
+/** The bot is gone: stop its Chrome, dock and anything else we started for that screen (do not delete the display itself, and leave the profile dir). */
 export function undressScreen(botId: string, screenId: string): Promise<void> {
   return inTurn(screenId, async () => {
     if (botId && !/^[\w.-]+$/.test(botId)) throw new Error(`bot id ${JSON.stringify(botId)} cannot be used as a folder name`);

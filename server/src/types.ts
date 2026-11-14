@@ -177,7 +177,6 @@ export interface LibraryFile { name: string; size: number; modifiedAt: number; i
 
 export interface ComputerState {
   status: 'absent' | 'creating' | 'starting' | 'running' | 'suspending' | 'suspended' | 'resuming' | 'error' | 'stopped';
-  orgoId: string | null;
   error: string | null;
   /** One screen per bot on the shared computer. width/height are the screen's pixel size. */
   screens: { botId: string; screenId: string; width?: number; height?: number }[];

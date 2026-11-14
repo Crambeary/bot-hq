@@ -2,82 +2,30 @@ import type { IncomingMessage, Server } from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { db } from './db.js';
 import { userFromCookieHeader } from './lib/auth.js';
-import { vncAuthResponse } from './lib/des.js';
-import { orgo } from './orgo.js';
+import net from 'node:net';
+import { env } from './env.js';
+import { displayFor } from './box.js';
 import { readyScreen, screenFor } from './computer.js';
 import { viewerClosed, viewerOpened } from './idle.js';
 
 /**
- * VNC relay: browser <-> our server <-> Orgo websockify.
- * The server performs the RFB handshake upstream with the computer's VNC password
- * (which is root-equivalent and never reaches the browser), then offers the browser
- * an unauthenticated RFB session. In "watch" mode, client input messages
- * (KeyEvent, PointerEvent, ClientCutText) are dropped server-side.
+ * VNC relay: browser <-> our server <-> x11vnc on 127.0.0.1:<5900+N> (security None, container-internal).
+ * The browser's noVNC speaks RFB over the websocket; we bridge its binary frames to a raw TCP socket
+ * and back, untouched. In "watch" mode, client input messages (KeyEvent, PointerEvent,
+ * ClientCutText) are dropped server-side. Since x11vnc has no password, this relay is the only
+ * door: the websocket upgrade needs a session and a same-origin Origin.
  */
 
-class ByteQueue {
-  private buf = Buffer.alloc(0);
-  private waiters: { n: number; resolve: (b: Buffer) => void; reject: (e: Error) => void }[] = [];
-  private closed: Error | null = null;
-  push(b: Buffer) { this.buf = Buffer.concat([this.buf, b]); this.drain(); }
-  close(e: Error) { this.closed = e; for (const w of this.waiters) w.reject(e); this.waiters = []; }
-  read(n: number): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      if (this.closed) return reject(this.closed);
-      this.waiters.push({ n, resolve, reject });
-      this.drain();
-    });
-  }
-  takeAll(): Buffer { const b = this.buf; this.buf = Buffer.alloc(0); return b; }
-  private drain() {
-    while (this.waiters.length && this.buf.length >= this.waiters[0].n) {
-      const w = this.waiters.shift()!;
-      const out = this.buf.subarray(0, w.n);
-      this.buf = this.buf.subarray(w.n);
-      w.resolve(Buffer.from(out));
-    }
-  }
-}
+/** VNC port of a screen's display: :99 -> 5900, :100 -> 5901, ... */
+export const vncPortFor = (screenId?: string | null) => 5900 + (Number(displayFor(screenId).slice(1)) - 99);
 
-const u32 = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
-
-async function upstreamHandshake(q: ByteQueue, send: (b: Buffer) => void, password: string): Promise<Buffer> {
-  await q.read(12); // server ProtocolVersion
-  send(Buffer.from('RFB 003.008\n'));
-  const n = (await q.read(1))[0];
-  if (n === 0) {
-    const len = (await q.read(4)).readUInt32BE();
-    throw new Error(`VNC refused: ${(await q.read(len)).toString()}`);
-  }
-  const types = [...(await q.read(n))];
-  const choice = types.includes(2) ? 2 : types.includes(1) ? 1 : -1;
-  if (choice < 0) throw new Error(`Unsupported VNC security types: ${types.join(',')}`);
-  send(Buffer.from([choice]));
-  if (choice === 2) {
-    const challenge = await q.read(16);
-    send(vncAuthResponse(password, challenge));
-  }
-  const result = (await q.read(4)).readUInt32BE();
-  if (result !== 0) {
-    let reason = '';
-    try { const len = (await q.read(4)).readUInt32BE(); reason = (await q.read(len)).toString(); } catch { /* none */ }
-    throw new Error(`VNC auth failed ${reason}`);
-  }
-  send(Buffer.from([1])); // ClientInit: shared
-  const head = await q.read(24); // w,h,pixfmt(16),nameLen
-  const nameLen = head.readUInt32BE(20);
-  const name = await q.read(nameLen);
-  return Buffer.concat([head, name]);
-}
-
-async function browserHandshake(q: ByteQueue, send: (b: Buffer) => void, serverInit: Buffer) {
-  send(Buffer.from('RFB 003.008\n'));
-  await q.read(12);
-  send(Buffer.from([1, 1])); // one security type: None
-  await q.read(1);
-  send(u32(0)); // SecurityResult OK
-  await q.read(1); // ClientInit
-  send(serverInit);
+/** Does this websocket upgrade come from our own page? A missing Origin (non-browser client) is refused too. */
+export function originAllowed(origin: string | undefined, host: string | undefined): boolean {
+  if (!origin) return false;
+  let o: URL;
+  try { o = new URL(origin); } catch { return false; }
+  try { if (o.origin === new URL(env.appUrl).origin) return true; } catch { /* bad APP_URL */ }
+  return !!host && o.host === host;
 }
 
 /** Filters a client->server RFB stream, dropping input events. Returns bytes to forward. */
@@ -125,6 +73,11 @@ export function attachVncRelay(server: Server) {
     const url = new URL(req.url ?? '/', 'http://x');
     const m = url.pathname.match(/^\/api\/bots\/([^/]+)\/screen$/);
     if (!m) return; // not ours
+    if (!originAllowed(req.headers.origin, req.headers.host)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
     const user = userFromCookieHeader(req.headers.cookie);
     const bot = user ? (db.prepare('SELECT * FROM bots WHERE id=? AND user_id=?').get(m[1], user.id) as any) : null;
     if (!user || !bot) {
@@ -137,53 +90,36 @@ export function attachVncRelay(server: Server) {
   });
 }
 
-async function relay(client: WebSocket, userId: string, botId: string, mode: 'watch' | 'control') {
-  const fromClient = new ByteQueue();
-  const fromUp = new ByteQueue();
-  let upstream: WebSocket | null = null;
-  let piping = false;
+/** Bridge a websocket client and a TCP upstream, byte for byte. Client input is filtered in watch mode. */
+export function bridge(client: WebSocket, upstream: net.Socket, mode: 'watch' | 'control') {
   const filter = new WatchFilter();
   const closeAll = (code = 1000, reason = '') => {
     try { client.close(code, reason.slice(0, 120)); } catch { /* */ }
-    try { upstream?.close(); } catch { /* */ }
+    upstream.destroy();
   };
-
   client.on('message', (data: Buffer) => {
-    if (!piping) return fromClient.push(Buffer.from(data));
     const fwd = mode === 'watch' ? filter.feed(Buffer.from(data)) : Buffer.from(data);
-    if (fwd.length && upstream?.readyState === WebSocket.OPEN) upstream.send(fwd);
+    if (fwd.length && !upstream.destroyed) upstream.write(fwd);
   });
-  client.on('close', () => { viewerClosed(userId); fromClient.close(new Error('client closed')); try { upstream?.close(); } catch { /* */ } });
-  viewerOpened(userId); // keeps the computer awake while someone is watching (see idle.ts)
+  upstream.on('data', (d) => { if (client.readyState === WebSocket.OPEN) client.send(d); });
+  upstream.on('close', () => closeAll(1000, 'upstream closed'));
+  upstream.on('error', (e) => closeAll(1011, String(e)));
+  client.on('close', () => upstream.destroy());
+  client.on('error', () => upstream.destroy());
+}
 
+async function relay(client: WebSocket, userId: string, botId: string, mode: 'watch' | 'control') {
+  client.on('close', () => viewerClosed(userId));
+  viewerOpened(userId); // counts watchers for the UI (see idle.ts)
   try {
-    const { computerId, screenId } = await screenFor(userId, botId);
+    const { screenId } = await screenFor(userId, botId);
     // A screen nobody has used yet is bare; set it up while the person is already watching.
     readyScreen(userId, botId).catch(() => {});
-    const { password } = await orgo.vncPassword(computerId);
-    const upUrl = `wss://www.orgo.ai/desktops/${computerId}/ws/websockify?token=${encodeURIComponent(password)}${screenId !== 'default' ? `&screen=${encodeURIComponent(screenId)}` : ''}`;
-    upstream = new WebSocket(upUrl, ['binary']);
-    upstream.on('message', (data: Buffer) => {
-      if (!piping) return fromUp.push(Buffer.from(data));
-      if (client.readyState === WebSocket.OPEN) client.send(data);
-    });
-    upstream.on('close', (code, reason) => { fromUp.close(new Error(`upstream closed ${code}`)); closeAll(1000, `upstream ${code} ${reason}`); });
-    upstream.on('error', (e) => { fromUp.close(e as Error); closeAll(1011, String(e)); });
-    await new Promise<void>((res, rej) => { upstream!.once('open', () => res()); upstream!.once('error', rej); });
-
-    const serverInit = await upstreamHandshake(fromUp, (b) => upstream!.send(b), password);
-    await browserHandshake(fromClient, (b) => client.send(b), serverInit);
-    // Flush anything that arrived during the handshake, then switch to piping.
-    piping = true;
-    const leftoverUp = fromUp.takeAll();
-    if (leftoverUp.length) client.send(leftoverUp);
-    const leftoverClient = fromClient.takeAll();
-    if (leftoverClient.length) {
-      const fwd = mode === 'watch' ? filter.feed(leftoverClient) : leftoverClient;
-      if (fwd.length) upstream.send(fwd);
-    }
+    const upstream = net.connect({ host: '127.0.0.1', port: vncPortFor(screenId) });
+    await new Promise<void>((res, rej) => { upstream.once('connect', () => res()); upstream.once('error', rej); });
+    bridge(client, upstream, mode);
   } catch (e: any) {
     console.warn('[vnc] relay failed', e?.message ?? e);
-    closeAll(1011, String(e?.message ?? e));
+    try { client.close(1011, String(e?.message ?? e).slice(0, 120)); } catch { /* */ }
   }
 }
