@@ -149,7 +149,12 @@ configApi.post('/bots/:id/engine/login', async (c) => {
   if (provider !== undefined && !/^[a-z0-9][a-z0-9._-]{0,40}$/.test(provider)) return c.json({ error: 'bad provider' }, 400);
   const hermes = `HERMES_HOME=${box.quote(home)} ${box.quote(env.hermesBin)}`;
   // Claude subscriptions sign in with OAuth; without the flag Hermes asks for an API key.
-  const cmd = !provider ? `${hermes} model` : `${hermes} auth add ${provider}${provider === 'anthropic' ? ' --type oauth' : ''}`;
+  // `auth add` only stores the credential; with model.provider unset ("auto"), Hermes 0.22 never falls
+  // back to it, so turns fail with no_provider_configured. Make the provider just signed in to the
+  // default. The gateway ignores a per-turn provider, so this config value is what counts.
+  const cmd = !provider
+    ? `${hermes} model`
+    : `${hermes} auth add ${provider}${provider === 'anthropic' ? ' --type oauth' : ''} && ${hermes} config set model.provider ${provider}`;
   try {
     const s = await readyScreen(user.id, b.id);
     await openTerminal(s.screenId, cmd, provider ? `Sign in: ${provider}` : 'Choose a model');
