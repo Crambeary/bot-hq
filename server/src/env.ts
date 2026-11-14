@@ -2,18 +2,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-function req(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env ${name}`);
-  return v;
-}
+function opt(name: string): string { return process.env[name] ?? ''; }
 
 /** A secret from NAME, or from the file named by NAME_FILE (so keys need not sit in .env). */
-function secret(name: string): string {
+function secret(name: string, optional = false): string {
   const direct = process.env[name];
   if (direct) return direct;
   const file = process.env[`${name}_FILE`];
   if (file) return fs.readFileSync(file, 'utf8').trim();
+  if (optional) return '';
   throw new Error(`Missing env ${name} (or ${name}_FILE)`);
 }
 
@@ -21,14 +18,15 @@ const hermesHome = process.env.HERMES_HOME_PRIMARY ?? path.join(os.homedir(), '.
 
 export const env = {
   port: Number(process.env.PORT ?? 8787),
+  host: process.env.HOST ?? '127.0.0.1',
   appUrl: process.env.APP_URL ?? 'http://localhost:5173',
   /** Public URL of this server, used for OAuth callbacks. */
   serverUrl: process.env.SERVER_URL ?? `http://localhost:${process.env.PORT ?? 8787}`,
-  xaiKey: req('XAI_API_KEY'),
+  xaiKey: opt('XAI_API_KEY'),
   xaiModel: process.env.XAI_MODEL ?? 'grok-4.7',
-  composioKey: req('COMPOSIO_API_KEY'),
-  orgoKey: secret('ORGO_API_KEY'),
-  sessionSecret: req('SESSION_SECRET'),
+  composioKey: opt('COMPOSIO_API_KEY'),
+  orgoKey: secret('ORGO_API_KEY', true),
+  sessionSecret: secret('SESSION_SECRET'),
   devLogin: process.env.DEV_LOGIN === '1',
   dbPath: process.env.DB_PATH ?? new URL('../../data/grokbot.db', import.meta.url).pathname,
 
@@ -65,3 +63,5 @@ export const env = {
   allowedEmails: (process.env.ALLOWED_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   libRoot: process.env.LIB_ROOT ?? '/root/grokbot/files',
 };
+
+export const features = { composio: !!env.composioKey, voice: !!env.xaiKey, xai: !!env.xaiKey, orgo: !!(env.orgoKey && env.orgoComputerId) };
