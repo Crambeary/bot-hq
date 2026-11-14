@@ -119,14 +119,14 @@ Plumbing: add `Features` to `server/src/types.ts` (imported as `@shared/types`);
 | `components/Sidebar.tsx:138,147-149` | Hide the connect-apps menu item and footer icon unless `features.composio`. |
 | `components/Composer.tsx:95` | Hide the "+" apps item unless `composio`. |
 | `components/Composer.tsx:114-127,137-146` | Hide dictation mic unless `voice`; always render the send arrow when `!voice` (idle CTA starts a call). |
-| `components/AppSettings.tsx:19,51,225-256`; `configStore.ts:9,48` | Drop the `apps` section and `configApi.connectedApps` fetch unless `composio`. |
-| `components/AppSettings.tsx:17,49,104-183` | ComputerSection: change "one cloud computer" (`:130`), hide sleep-after-idle (`:138`) and Sleep/Wake buttons (`:141-145`); keep screens list and Reset. |
+| `components/config/AppSettings.tsx:19,51,225-256`; `configStore.ts:9,48` | Drop the `apps` section and `configApi.connectedApps` fetch unless `composio`. |
+| `components/config/AppSettings.tsx:17,49,104-183` | ComputerSection: change "one cloud computer" (`:130`), hide sleep-after-idle (`:138`) and Sleep/Wake buttons (`:141-145`); keep screens list and Reset. |
 | `components/DetailsPanel.tsx:60-63,123-137` | Hide Add to Slack/Suggested unless `composio`. |
 | `components/DetailsPanel.tsx:10,144-147` | Hide VoiceSettings (it fetches `/api/voice/options` on mount) unless `voice`. |
 | `components/ChatView.tsx:11,36` | Mount `VoiceCallBar` only if `voice`. |
 | `components/cards/Cards.tsx:37,105-148` | Hide ConnectCard unless `composio`; pass no logo URL for approvals (`:37` fetches from `logos.composio.dev`, an external call). |
-| `components/ConnectAppsModal.tsx`, `ToolkitLogo.tsx`; `App.tsx:31-37,65` | Do not mount modal or popup listener unless `composio`. |
-| `components/CreateBotModal.tsx:82` | Reword "with your apps". |
+| `components/modals/ConnectAppsModal.tsx`, `ToolkitLogo.tsx`; `App.tsx:31-37,65` | Do not mount modal or popup listener unless `composio`. |
+| `components/modals/CreateBotModal.tsx:82` | Reword "with your apps". |
 | `components/SignIn.tsx:31-41,43` | Google button only if `composio`; dev form only if `devLogin`; otherwise show "Ask the owner for a sign-in link (`scripts/sign-in-link.sh`)". Drop or soften the xAI footer. |
 | `lib/computer.ts:3-13`; `ComputerViewer.tsx:65-77,201-243`; `LibraryTab.tsx:65-73`; `configApi.ts:60-62` | Remove asleep/wake wording and `wake`/`sleep` calls; local computer is always on. `ComputerViewer.tsx:99-101` needs no change (it already targets `/api/bots/:id/screen`). |
 | `dev/fixtures.ts:35` | Update the connect-card fixture. |
