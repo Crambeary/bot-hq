@@ -51,6 +51,9 @@ export function DetailsPanel() {
   const routines = useStore((s) => (bot ? s.routines[bot.id] : undefined));
   const computer = useStore((s) => s.computer);
   const viewerOpen = useStore((s) => s.viewerOpen);
+  const composio = useStore((s) => s.features.composio);
+  const voice = useStore((s) => s.features.voice);
+  const orgo = useStore((s) => s.features.orgo);
   const set = useStore((s) => s.set);
   const [tab, setTab] = useState<'activity' | 'tasks' | 'library'>('activity');
   const [hideSuggested, setHideSuggested] = useState(() => { try { return localStorage.getItem('grokbot.hideSuggested') === '1'; } catch { return false; } });
@@ -88,7 +91,7 @@ export function DetailsPanel() {
                   <span className="details__who-name" title={displayName(bot)}>{displayName(bot)}</span>
                   {bot.model && <span className="details__model" title={bot.provider ? `${bot.provider} · ${bot.model}` : bot.model}>{bot.model}</span>}
                 </div>
-                <div className="details__who-sub">Computer {computerStatusText(computer).toLowerCase()}</div>
+                <div className="details__who-sub">Computer {computerStatusText(computer, orgo).toLowerCase()}</div>
               </div>
               <button type="button" className="btn btn--sm btn--secondary details__open" onClick={() => openComputer('watch')}>Open</button>
             </div>
@@ -120,7 +123,7 @@ export function DetailsPanel() {
                 <MembersCard room={bot} />
               </section>
             )}
-            {bot.kind !== 'room' && !hideSuggested && (
+            {composio && bot.kind !== 'room' && !hideSuggested && (
               <section>
                 <div className="section-label section-label--row">
                   <span>Suggested</span>
@@ -141,10 +144,10 @@ export function DetailsPanel() {
                   <div className="section-label">Engine</div>
                   <EngineSettings bot={bot} />
                 </section>
-                <section>
+                {voice && <section>
                   <div className="section-label">Voice chat</div>
                   <VoiceSettings bot={bot} />
-                </section>
+                </section>}
               </>
             )}
           </div>

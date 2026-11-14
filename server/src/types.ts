@@ -229,3 +229,5 @@ export type ServerEvent =
   | { type: 'memories'; botId: string }
   | { type: 'connections' }
   | { type: 'ping' };
+
+export interface Features { composio: boolean; voice: boolean; xai: boolean; orgo: boolean }

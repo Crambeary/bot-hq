@@ -20,6 +20,7 @@ function Shell() {
   const viewerOpen = useStore((s) => s.viewerOpen);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const hasBot = useStore((s) => !!s.selectedBotId);
+  const composio = useStore((s) => s.features.composio);
   const view = useConfigUI((s) => s.view);
 
   useEffect(() => {
@@ -34,7 +35,7 @@ function Shell() {
       s.set({ connectionsVersion: s.connectionsVersion + 1 });
       if (s.selectedBotId) s.loadRows(s.selectedBotId).catch(() => {});
     };
-    window.addEventListener('message', onMsg);
+    if (useStore.getState().features.composio) window.addEventListener('message', onMsg);
     return () => { stop(); window.removeEventListener('message', onMsg); };
   }, []);
 
@@ -62,7 +63,7 @@ function Shell() {
       {modal === 'create' && <CreateBotModal />}
       {modal === 'group' && <CreateGroupModal />}
       {modal === 'search' && <SearchModal />}
-      {modal === 'apps' && <ConnectAppsModal />}
+      {composio && modal === 'apps' && <ConnectAppsModal />}
       {viewerOpen && <ComputerViewer />}
       <ConfigLayer />
     </div>

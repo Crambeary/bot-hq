@@ -27,6 +27,7 @@ export const humanizeToolkit = (slug: string) => KNOWN[slug.toLowerCase()] ?? sl
 const APPROVAL_OUTCOME: Record<string, string> = { allowed: 'Allowed once', always: 'Always allowed', denied: 'Not allowed', expired: 'Expired' };
 
 export function ApprovalCard({ body }: { body: Card<'approval'> }) {
+  const composio = useStore((s) => s.features.composio);
   const { busy, error, run } = useBusy();
   const pending = body.status === 'pending';
   const decide = (d: 'allow' | 'always' | 'deny') => run(d, () => api.approve(body.approvalId, d));
@@ -34,7 +35,7 @@ export function ApprovalCard({ body }: { body: Card<'approval'> }) {
   return (
     <div className={`card approval-card${pending ? '' : ' is-resolved'}`}>
       <div className="card__head">
-        <ToolkitLogo name={name} logo={body.toolkit ? `https://logos.composio.dev/api/${body.toolkit.toLowerCase()}` : undefined} size={44} />
+        {composio ? <ToolkitLogo name={name} logo={body.toolkit ? `https://logos.composio.dev/api/${body.toolkit.toLowerCase()}` : undefined} size={44} /> : <span className="toolkit-logo" style={{ width: 44, height: 44, borderRadius: 8 }}><span className="toolkit-logo__letter" style={{ fontSize: 18 }}>{name.trim()[0]?.toUpperCase() ?? '?'}</span></span>}
         <div className="card__titles">
           <div className="card__title">{body.title}</div>
           <div className="card__sub">{name}</div>
@@ -196,12 +197,13 @@ export function DraftCard({ body }: { body: Card<'draft'> }) {
 }
 
 export function CardRow({ row }: { row: Row }) {
+  const composio = useStore((s) => s.features.composio);
   const b = row.body;
   if (b.type !== 'card') return null;
   switch (b.card) {
     case 'approval': return <ApprovalCard body={b} />;
     case 'question': return <QuestionCard row={row} body={b} />;
-    case 'connect': return <ConnectCard row={row} body={b} />;
+    case 'connect': return composio ? <ConnectCard row={row} body={b} /> : null;
     case 'draft': return <DraftCard body={b} />;
     default: return null;
   }

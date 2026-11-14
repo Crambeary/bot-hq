@@ -17,6 +17,8 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
   const [menu, setMenu] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const setModal = useStore((s) => s.setModal);
+  const composio = useStore((s) => s.features.composio);
+  const voice = useStore((s) => s.features.voice);
 
   // Per-bot drafts.
   useEffect(() => { setText(drafts.get(bot.id) ?? ''); setError(null); ref.current?.focus(); }, [bot.id]);
@@ -92,7 +94,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
                 onClose={() => setMenu(false)}
                 items={[
                   { label: 'New conversation', onSelect: fresh },
-                  { label: 'Connect apps', onSelect: () => setModal('apps') },
+                  ...(composio ? [{ label: 'Connect apps', onSelect: () => setModal('apps') }] : []),
                 ]}
               />
             )}
@@ -111,7 +113,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
           />
         </div>
         <div className="composer__right">
-          <button
+          {voice && <button
             type="button"
             className={`composer__btn${dictation.state === 'recording' ? ' is-recording' : dictation.state === 'transcribing' ? ' is-transcribing' : ''}`}
             aria-label={dictation.state === 'recording' ? 'Stop dictation' : 'Dictate'}
@@ -124,7 +126,7 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
             onContextMenu={(e) => e.preventDefault()}
           >
             <Icon name="mic" opacity={0.56} />
-          </button>
+          </button>}
           {inCall && !hasText ? (
             <button type="button" className="composer__cta is-in-call" onClick={endCall} aria-label="End voice call" title="End voice call">
               <Icon name="voice_a" size={16} />
@@ -137,12 +139,12 @@ export function Composer({ bot, running }: { bot: Bot; running: boolean }) {
             <button
               type="button"
               className="composer__cta"
-              onClick={hasText ? send : () => startCall(bot.id)}
+              onClick={hasText ? send : voice ? () => startCall(bot.id) : undefined}
               disabled={hasText && sending}
-              aria-label={hasText ? 'Send' : `Start voice chat with ${bot.name}`}
-              title={hasText ? 'Send (Enter)' : 'Start voice chat'}
+              aria-label={hasText || !voice ? 'Send' : `Start voice chat with ${bot.name}`}
+              title={hasText || !voice ? 'Send (Enter)' : 'Start voice chat'}
             >
-              <Icon name={hasText ? 'arrow_up' : 'voice_a'} size={16} />
+              <Icon name={hasText || !voice ? 'arrow_up' : 'voice_a'} size={16} />
             </button>
           )}
         </div>
