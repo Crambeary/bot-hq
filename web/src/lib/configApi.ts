@@ -76,5 +76,6 @@ export const configApi = {
   deletePolicy: (tool: string) => req<{ ok: true }>('DELETE', `/policies/${encodeURIComponent(tool)}`),
 
   connectedApps: () => req<{ connectedApps?: Toolkit[]; connected: string[] }>('GET', '/apps?limit=1'),
+
   logout: () => req<{ ok: true }>('POST', '/auth/logout'),
 };

@@ -15,6 +15,7 @@ export function ChatView() {
   const transcript = useStore((s) => (bot ? s.transcripts[bot.id] : undefined));
   const live = useStore((s) => (bot ? s.live[bot.id] : undefined));
   const detailsOpen = useStore((s) => s.detailsOpen);
+  const voice = useStore((s) => s.features.voice);
   const set = useStore((s) => s.set);
   const [menu, setMenu] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -33,7 +34,7 @@ export function ChatView() {
   return (
     <main className="chat" style={botVars(bot.avatarColor)}>
       <Transcript bot={bot} rows={rows} live={live} loaded={!!transcript?.loaded} />
-      <VoiceCallBar />
+      {voice && <VoiceCallBar />}
       <Composer bot={bot} running={!!live?.isRunning} />
       <header className="chat__header">
         <span className="chat__pill-anchor">

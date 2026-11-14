@@ -53,6 +53,7 @@ export function Sidebar() {
   const inTasks = useConfigUI((s) => s.view === 'tasks');
   const selectedBotId = inTasks ? null : storeSelectedBotId; // nothing highlighted while the Tasks view is open
   const user = useStore((s) => s.user);
+  const composio = useStore((s) => s.features.composio);
   const collapsed = useStore((s) => s.sidebarCollapsed);
   const set = useStore((s) => s.set);
   const storeSelectBot = useStore((s) => s.selectBot);
@@ -135,7 +136,7 @@ export function Sidebar() {
                 onClose={() => setAccountMenu(false)}
                 items={[
                   { label: 'Settings', hint: '⌘,', onSelect: () => useConfigUI.getState().openAppSettings() },
-                  { label: 'Connect apps', onSelect: () => setModal('apps') },
+                  ...(composio ? [{ label: 'Connect apps', onSelect: () => setModal('apps') }] : []),
                   { label: 'Log out', danger: true, onSelect: logout },
                 ]}
               >
@@ -144,9 +145,7 @@ export function Sidebar() {
             )}
           </div>
         )}
-        <button type="button" className="icon-btn icon-btn--bordered" onClick={() => setModal('apps')} aria-label="Connect apps" title="Connect apps">
-          <Icon name="apps" />
-        </button>
+        {composio && <button type="button" className="icon-btn icon-btn--bordered" onClick={() => setModal('apps')} aria-label="Connect apps" title="Connect apps"><Icon name="apps" /></button>}
       </div>
     </aside>
   );

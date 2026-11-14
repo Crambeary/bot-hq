@@ -25,6 +25,7 @@ export function AppSettings() {
   const section = useConfigUI((s) => s.appSettings);
   const close = useConfigUI((s) => s.closeAppSettings);
   const open = useConfigUI((s) => s.openAppSettings);
+  const composio = useStore((s) => s.features.composio);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !document.querySelector('.modal-root')) { e.preventDefault(); close(); } };
     window.addEventListener('keydown', k);
@@ -36,7 +37,7 @@ export function AppSettings() {
       <aside className="app-settings__nav">
         <button type="button" className="app-settings__back" onClick={close}><Glyph name="arrow_left" size={14} /> Back to Bots</button>
         <div className="app-settings__heading">Settings</div>
-        {SECTIONS.map((s) => (
+        {SECTIONS.filter((s) => composio || s.id !== 'apps').map((s) => (
           <button key={s.id} type="button" className={`cfg-nav__item${section === s.id ? ' is-active' : ''}`} onClick={() => open(s.id)} aria-current={section === s.id || undefined}>
             {s.label}
           </button>
@@ -48,7 +49,7 @@ export function AppSettings() {
           {section === 'general' && <GeneralSection />}
           {section === 'computer' && <ComputerSection />}
           {section === 'permissions' && <PermissionsSection />}
-          {section === 'apps' && <AppsSection />}
+          {composio && section === 'apps' && <AppsSection />}
           {section === 'account' && <AccountSection />}
         </div>
       </div>
@@ -106,8 +107,9 @@ const screenLabel = (id: string) => (id === 'default' ? 'Main screen' : `Screen 
 function ComputerSection() {
   const computer = useStore((s) => s.computer);
   const bots = useStore((s) => s.bots);
+  const orgo = useStore((s) => s.features.orgo);
   const [details, setDetails] = useState<ComputerDetails | null>(null);
-  const [busy, setBusy] = useState<'wake' | 'sleep' | null>(null);
+  const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const load = useCallback(() => { configApi.computerDetails().then(setDetails).catch(() => {}); }, []);
   useEffect(() => { load(); }, [load, computer?.status, computer?.screens.length]);
@@ -115,34 +117,24 @@ function ComputerSection() {
   const status = computer?.status ?? details?.computer.status;
   const running = status === 'running';
   const transitioning = status === 'starting' || status === 'resuming' || status === 'creating' || status === 'suspending';
-  const act = async (kind: 'wake' | 'sleep') => {
-    setBusy(kind); setNote(null);
-    try { kind === 'wake' ? await configApi.wake() : await configApi.sleep(); }
-    catch (e) { setNote((e as Error).message); }
-    finally { setBusy(null); }
-  };
   const byId = new Map(bots.map((b) => [b.id, b]));
   // The server says how many screens the computer can hold; 4 until it does.
   const maxScreens = computer?.maxScreens ?? details?.computer.maxScreens ?? 4;
 
   return (
     <>
-      <PageHead title="Computer" sub="Your Bots share one cloud computer. Each Bot works on its own screen." />
+      <PageHead title="Computer" sub={orgo ? 'Your Bots share one cloud computer. Each Bot works on its own screen.' : 'Your Bots share a local computer. Each Bot works on its own screen.'} />
       <section className="cfg-section">
         <div className="cfg-card">
           <div className="cfg-row">
             <span className={`computer-status-dot is-${running ? 'on' : transitioning ? 'busy' : 'off'}`} aria-hidden />
             <div className="cfg-row__text">
-              <div className="cfg-row__title">Bots’ computer · {computerStatusText(computer ?? null)}</div>
-              <div className="cfg-row__sub">
+              <div className="cfg-row__title">Bots’ computer · {computerStatusText(computer ?? null, orgo)}</div>
+              {orgo && <div className="cfg-row__sub">
                 {details ? `Goes to sleep after ${details.hibernation.idleMinutes} idle minutes when nobody is watching. Starts again on its own once a Bot has work.` : 'Checking…'}
-              </div>
+              </div>}
             </div>
-            {running || status === 'suspending' ? (
-              <button type="button" className="cfg-btn cfg-btn--secondary" disabled={!running || !!busy} onClick={() => act('sleep')}>{busy === 'sleep' || status === 'suspending' ? 'Going to sleep…' : 'Sleep'}</button>
-            ) : (
-              <button type="button" className="cfg-btn cfg-btn--primary" disabled={transitioning || !!busy} onClick={() => act('wake')}>{busy === 'wake' || transitioning ? 'Waking…' : 'Wake'}</button>
-            )}
+            {orgo && (running || status === 'suspending' ? <button type="button" className="cfg-btn cfg-btn--secondary" disabled={!running || busy} onClick={async () => { setBusy(true); try { await configApi.sleep(); } catch (e) { setNote((e as Error).message); } finally { setBusy(false); } }}>{busy || status === 'suspending' ? 'Going to sleep…' : 'Sleep'}</button> : <button type="button" className="cfg-btn cfg-btn--primary" disabled={transitioning || busy} onClick={async () => { setBusy(true); try { await configApi.wake(); } catch (e) { setNote((e as Error).message); } finally { setBusy(false); } }}>{busy || transitioning ? 'Waking…' : 'Wake'}</button>)}
           </div>
           {computer?.error && status === 'error' && <div className="cfg-error cfg-error--inset">{computer.error}</div>}
           {note && <div className="cfg-error cfg-error--inset">{note}</div>}
@@ -167,7 +159,7 @@ function ComputerSection() {
                   className="cfg-btn cfg-btn--secondary"
                   confirmLabel="Reset screen"
                   disabled={!running}
-                  title={running ? 'Closes everything open on this screen' : 'Wake the computer first'}
+                  title={running ? 'Closes everything open on this screen' : orgo ? 'Wake the computer first' : 'Computer is starting'}
                   onConfirm={async () => { try { await configApi.resetScreen(s.botId); setNote(null); load(); } catch (e) { setNote((e as Error).message); } }}
                 >
                   Reset
@@ -222,6 +214,8 @@ function PermissionsSection() {
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+
 function AppsSection() {
   const version = useStore((s) => s.connectionsVersion);
   const [apps, setApps] = useState<Toolkit[] | null>(null);
@@ -242,10 +236,7 @@ function AppsSection() {
           {apps?.map((a) => (
             <div key={a.slug} className="cfg-row">
               <ToolkitLogo name={a.name} logo={a.logo} size={28} radius={7} />
-              <div className="cfg-row__text">
-                <div className="cfg-row__title">{a.name}</div>
-                {a.description && <div className="cfg-row__sub">{a.description}</div>}
-              </div>
+              <div className="cfg-row__text"><div className="cfg-row__title">{a.name}</div>{a.description && <div className="cfg-row__sub">{a.description}</div>}</div>
               <span className="cfg-chip">Connected</span>
             </div>
           ))}
