@@ -1,0 +1,16 @@
+.git
+.claude
+.env
+.env.*
+!.env.example
+secrets
+node_modules
+**/node_modules
+**/dist
+data
+*.db
+*.db-*
+docs
+tests
+web/screenshots
+design

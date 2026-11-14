@@ -14,12 +14,15 @@ import subprocess
 import time
 import urllib.request
 
-ROOT = '/opt/hq'
+# Where things live. The defaults are the ones the box has always used; a container (or any other
+# layout) can move them with these variables.
+ROOT = os.environ.get('HQ_ROOT') or '/opt/hq'
 SCREENS = ROOT + '/screens'
 JOBS = ROOT + '/jobs'
 EXT = ROOT + '/ext'
-LOGS = '/var/log/hq'
-PROFILES = '/root/grokbot/profiles'
+LOGS = os.environ.get('HQ_LOGS') or '/var/log/hq'
+PROFILES = os.environ.get('HQ_PROFILES') or '/root/grokbot/profiles'
+FILES = os.environ.get('HQ_FILES') or '/root/grokbot/files'
 HOME_PORT = 7391
 HOME_URL = 'http://127.0.0.1:%d' % HOME_PORT
 BROWSER_CLASS = 'HQBrowser'
@@ -649,7 +652,7 @@ def settle_window(n, pid, wait=4.0):
 
 def open_files(n):
     env = screen_env(n)
-    start = '/root/grokbot/files' if os.path.isdir('/root/grokbot/files') else env['HOME']
+    start = FILES if os.path.isdir(FILES) else env['HOME']
     for name in ('thunar', 'nautilus', 'nemo', 'pcmanfm', 'caja'):
         if shutil.which(name):
             return spawn([name, start], env, 'files-%d' % int(n))
