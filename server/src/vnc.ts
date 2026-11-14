@@ -28,12 +28,30 @@ export function originAllowed(origin: string | undefined, host: string | undefin
   return !!host && o.host === host;
 }
 
-/** Filters a client->server RFB stream, dropping input events. Returns bytes to forward. */
-class WatchFilter {
+/**
+ * Filters a client->server RFB stream, dropping input events. Returns bytes to forward.
+ * The relay is a raw pass-through, so the stream starts with the client's half of the handshake,
+ * which is forwarded untouched: ProtocolVersion (12 bytes), then for RFB 3.7+ the chosen security
+ * type (1 byte; x11vnc here offers only None, so no auth bytes follow), then ClientInit (1 byte).
+ */
+export class WatchFilter {
   private pending = Buffer.alloc(0);
+  private handshake = -1; // client handshake bytes still to pass through; -1 = version not read yet
   feed(chunk: Buffer): Buffer {
     this.pending = Buffer.concat([this.pending, chunk]);
     const out: Buffer[] = [];
+    if (this.handshake === -1) {
+      if (this.pending.length < 12) return Buffer.alloc(0);
+      const minor = Number(this.pending.subarray(8, 11).toString('latin1'));
+      this.handshake = 12 + (minor >= 7 ? 1 : 0) + 1;
+    }
+    if (this.handshake > 0) {
+      const n = Math.min(this.handshake, this.pending.length);
+      out.push(Buffer.from(this.pending.subarray(0, n)));
+      this.pending = this.pending.subarray(n);
+      this.handshake -= n;
+      if (this.handshake > 0) return Buffer.concat(out);
+    }
     for (;;) {
       const b = this.pending;
       if (!b.length) break;
