@@ -2,9 +2,10 @@ import crypto from 'node:crypto';
 import { Hono } from 'hono';
 import { getBotRow } from './store.js';
 import { composioTools } from './composio.js';
+import { features } from './env.js';
 import { mcpToken, primaryBotId } from './engine.js';
 import { claimToolRow, enqueueBotMessage, markSilent, noteToolOutcome, requestApproval, turnDepth } from './agent/loop.js';
-import { policyFor, runComposioTool, toolMap, TOOLS, type ToolCtx } from './agent/tools.js';
+import { policyFor, runComposioTool, toolMap, enabledTools, type ToolCtx } from './agent/tools.js';
 
 /**
  * The app's tools, served to the Hermes engines over MCP (streamable HTTP, JSON answers only).
@@ -41,9 +42,9 @@ function caller(slug: string, auth: string | undefined): { botId: string | null 
 }
 
 async function listTools(botId: string | null) {
-  const own = TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters }));
+  const own = enabledTools().map((t) => ({ name: t.name, description: t.description, inputSchema: t.parameters }));
   const bot = botId ? getBotRow(botId) : null;
-  if (!bot) return own;
+  if (!bot || !features.composio) return own;
   const apps = (await composioTools(bot.user_id))
     .filter((t: any) => t?.type === 'function' && typeof t.name === 'string' && !toolMap.has(t.name))
     .map((t: any) => ({ name: t.name as string, description: String(t.description ?? ''), inputSchema: t.parameters ?? { type: 'object', properties: {} } }));
@@ -55,6 +56,7 @@ async function callTool(botId: string | null, rawName: string, args: any): Promi
   if (!botId || !bot) return text('The team app has no bot for this agent yet. Ask the user to open the app once, then try again.', true);
   const userId: string = bot.user_id;
   const name = [...toolMap.keys()].find((k) => k.toLowerCase() === rawName.toLowerCase()) ?? rawName;
+  if ((toolMap.has(name) && !enabledTools().some((t) => t.name === name)) || (!toolMap.has(name) && !features.composio)) return text('Tool disabled or unknown', true);
   const rowSeq = await claimToolRow(botId, name);
   const ctx: ToolCtx = { userId, botId, enqueueBotMessage, depth: turnDepth(botId) };
   try {

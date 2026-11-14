@@ -2,7 +2,7 @@ import { db, now } from '../db.js';
 import { newId } from '../lib/ids.js';
 import { hub } from '../lib/hub.js';
 import { box } from '../box.js';
-import { env } from '../env.js';
+import { env, features } from '../env.js';
 import { appendRow, getBotRow, listRoutines, toRoutine, describeCron } from '../store.js';
 import { executeComposio, innerToolSlugs, isReadOnlySlug, toolkitInfo } from '../composio.js';
 import { scheduleRoutine, unscheduleRoutine } from '../routines.js';
@@ -326,6 +326,11 @@ export const TOOLS: ToolDef[] = [
 ];
 
 export const toolMap = new Map(TOOLS.map((t) => [t.name, t]));
+
+export function enabledTools() {
+  const composioOnly = new Set(['request_app_connection', 'list_event_triggers', 'create_event_routine']);
+  return TOOLS.filter((t) => (features.composio || !composioOnly.has(t.name)) && (features.xai || t.name !== 'x_search'));
+}
 
 // ---------- approvals policy ----------
 

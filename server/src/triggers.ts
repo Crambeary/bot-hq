@@ -1,5 +1,6 @@
 import { db, now } from './db.js';
-import { composio } from './composio.js';
+import { getComposio } from './composio.js';
+import { features } from './env.js';
 import { appendRow } from './store.js';
 
 /**
@@ -21,6 +22,7 @@ function migrate() {
 }
 
 export async function initTriggers(enqueue: (botId: string, t: any) => void) {
+  if (!features.composio) return;
   migrate();
   enqueueFn = enqueue;
   const count = (db.prepare("SELECT COUNT(*) n FROM routines WHERE schedule LIKE 'event:%'").get() as any).n;
@@ -29,10 +31,11 @@ export async function initTriggers(enqueue: (botId: string, t: any) => void) {
 }
 
 async function ensureSubscribed() {
+  if (!features.composio) return;
   if (subscribed) return;
   subscribed = true;
   try {
-    await composio.triggers.subscribe(
+    await getComposio().triggers.subscribe(
       (data: any) => onTrigger(data),
       undefined,
       (err) => console.warn('[triggers] subscription error', JSON.stringify(err).slice(0, 300)),
@@ -62,7 +65,8 @@ function onTrigger(data: any) {
 }
 
 export async function listTriggerTypes(toolkit: string) {
-  const r: any = await composio.triggers.listTypes({ toolkits: [toolkit] } as any);
+  if (!features.composio) return [];
+  const r: any = await getComposio().triggers.listTypes({ toolkits: [toolkit] } as any);
   const items: any[] = r?.items ?? r ?? [];
   return items.slice(0, 40).map((t) => ({
     slug: t.slug,
@@ -73,9 +77,10 @@ export async function listTriggerTypes(toolkit: string) {
 }
 
 export async function createEventRoutine(userId: string, botId: string, a: { name: string; prompt: string; trigger_slug: string; config?: Record<string, unknown> }) {
+  if (!features.composio) throw new Error('Composio event routines are disabled');
   migrate();
   const slug = a.trigger_slug.toUpperCase();
-  const res: any = await composio.triggers.create(userId, slug, { triggerConfig: a.config ?? {} } as any);
+  const res: any = await getComposio().triggers.create(userId, slug, { triggerConfig: a.config ?? {} } as any);
   const triggerId = res?.triggerId ?? res?.trigger_id ?? res?.id;
   if (!triggerId) throw new Error(`Composio did not return a trigger id: ${JSON.stringify(res).slice(0, 200)}`);
   const id = `rt_${Math.random().toString(36).slice(2, 12)}`;
@@ -87,11 +92,12 @@ export async function createEventRoutine(userId: string, botId: string, a: { nam
 
 /** Called by the routine scheduler when an event routine is enabled/disabled/deleted. */
 export async function setEventRoutineEnabled(routineId: string, enabled: boolean) {
+  if (!features.composio) return;
   const r = db.prepare('SELECT trigger_id FROM routines WHERE id=?').get(routineId) as any;
   if (!r?.trigger_id) return;
   try {
-    if (enabled) { await composio.triggers.enable(r.trigger_id); await ensureSubscribed(); }
-    else await composio.triggers.disable(r.trigger_id);
+    if (enabled) { await getComposio().triggers.enable(r.trigger_id); await ensureSubscribed(); }
+    else await getComposio().triggers.disable(r.trigger_id);
   } catch (e) {
     console.warn('[triggers] toggle failed', routineId, (e as Error).message);
   }
@@ -106,7 +112,8 @@ export function describeEvent(schedule: string) {
 
 /** Remove the Composio trigger behind an event routine (call before deleting the routine row). */
 export async function deleteEventTrigger(routineId: string) {
+  if (!features.composio) return;
   const r = db.prepare('SELECT trigger_id FROM routines WHERE id=?').get(routineId) as any;
   if (!r?.trigger_id) return;
-  try { await composio.triggers.delete(r.trigger_id); } catch (e) { console.warn('[triggers] delete failed', routineId, (e as Error).message); }
+  try { await getComposio().triggers.delete(r.trigger_id); } catch (e) { console.warn('[triggers] delete failed', routineId, (e as Error).message); }
 }
