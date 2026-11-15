@@ -96,6 +96,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     let rfb: RFBType | null = null;
     let onPaste: ((e: ClipboardEvent) => void) | null = null;
     setConn('connecting');
+    setPasteBox(false);
     (async () => {
       const { default: RFB } = await import('@novnc/novnc');
       if (disposed || !canvasRef.current) return;
@@ -131,6 +132,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     const el = canvasRef.current;
     return () => {
       disposed = true;
+      setPasteBox(false);
       if (onPaste) document.removeEventListener('paste', onPaste);
       try { rfb?.disconnect(); } catch { /* already closed */ }
       rfbRef.current = null;
@@ -193,7 +195,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     if (el.value) rfbRef.current?.clipboardPasteFrom(el.value);
     el.value = '';
     setPasteBox(false);
-    setNote('Now paste on the screen (Ctrl+Shift+V in a terminal).');
+    setNote('Sent. Now paste on the screen (Ctrl+Shift+V in a terminal).');
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -313,12 +315,14 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
             <span className="screen__chin-actions">
               {pasteBox && (
                 <input
-                  type="text"
+                  type="password"
                   className="screen__chin-input"
-                  placeholder="Paste text, press Enter"
+                  placeholder="Paste text (hidden), press Enter"
                   aria-label="Text to send to the screen"
                   autoFocus
                   autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
                   spellCheck={false}
                   onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
                 />
