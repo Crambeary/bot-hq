@@ -15,5 +15,6 @@ declare module '@novnc/novnc' {
     focus(): void;
     blur(): void;
     sendCtrlAltDel(): void;
+    clipboardPasteFrom(text: string): void;
   }
 }

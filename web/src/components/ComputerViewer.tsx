@@ -93,6 +93,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     if (!wantLive || !canvasRef.current) { setConn('idle'); return; }
     let disposed = false;
     let rfb: RFBType | null = null;
+    let onPaste: ((e: ClipboardEvent) => void) | null = null;
     setConn('connecting');
     (async () => {
       const { default: RFB } = await import('@novnc/novnc');
@@ -108,11 +109,25 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
       rfb.addEventListener('connect', () => { if (!disposed) { hadFrame.current = true; setConn('connected'); if (mode === 'control') rfb?.focus(); } });
       rfb.addEventListener('disconnect', (e) => { if (!disposed) setConn((e as CustomEvent<{ clean: boolean }>).detail?.clean ? 'disconnected' : 'error'); });
       rfb.addEventListener('securityfailure', () => { if (!disposed) setConn('error'); });
+      if (mode === 'control') {
+        // Clipboard bridge: text copied in the remote app lands on this browser's clipboard, and text pasted
+        // here reaches the remote one (the sign-in code a terminal on the screen waits for).
+        rfb.addEventListener('clipboard', (e) => {
+          const text = (e as CustomEvent<{ text: string }>).detail?.text;
+          if (text) navigator.clipboard?.writeText(text).catch(() => {});
+        });
+        onPaste = (e: ClipboardEvent) => {
+          const text = e.clipboardData?.getData('text/plain');
+          if (text) rfb?.clipboardPasteFrom(text);
+        };
+        document.addEventListener('paste', onPaste);
+      }
       rfbRef.current = rfb;
     })().catch(() => { if (!disposed) setConn('error'); });
     const el = canvasRef.current;
     return () => {
       disposed = true;
+      if (onPaste) document.removeEventListener('paste', onPaste);
       try { rfb?.disconnect(); } catch { /* already closed */ }
       rfbRef.current = null;
       el.innerHTML = '';
@@ -164,6 +179,10 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     else if (orgo) wake();
     // Local: refresh the computer's state; once it reads running, the connection effect reconnects.
     else useStore.getState().loadComputer().catch(() => {});
+  };
+  // Ctrl+V reaches the remote desktop as a keypress, so the clipboard button is the sure way to send text over.
+  const pasteToScreen = () => {
+    navigator.clipboard?.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setNote('Allow clipboard access, or press Ctrl+V.'));
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -278,9 +297,10 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
           <div className="screen__chin">
             <span className="screen__chin-text" role="status">
               <i className="screen__ping" aria-hidden />
-              <span>{hint || 'You’re driving'}</span>
+              <span>{note || hint ||'You’re driving'}</span>
             </span>
             <span className="screen__chin-actions">
+              <button type="button" className="screen__chin-btn" onClick={pasteToScreen} title="Send your clipboard text to this screen, then paste there (Ctrl+Shift+V in a terminal)">Paste to screen</button>
               {canFullscreen && (
                 <button type="button" className="screen__chin-icon" onClick={toggleFullscreen} aria-label={fullscreen ? 'Leave full screen' : 'Full screen'} title={fullscreen ? 'Leave full screen' : 'Full screen'}>
                   <Icon name={fullscreen ? 'shrink' : 'expand'} size={15} />
