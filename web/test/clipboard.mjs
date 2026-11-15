@@ -130,8 +130,19 @@ try {
   await box2.press('Enter');
   assert.equal((await page.evaluate(() => window.sent)).at(-1), 'one\ntwo', 'typing after a multiline paste is ignored, not sent as dots');
   assert.equal(await count('sent'), sentBefore + 1);
+  // A single-line paste over a locked multiline paste replaces it.
   await page.getByRole('button', { name: 'Paste to screen', exact: true }).click();
-  const box3 = page.getByLabel('Text to send to the screen');
+  const box4 = page.getByLabel('Text to send to the screen');
+  const pasteInto = (loc, text) => loc.evaluate((el, t) => {
+    const data = new DataTransfer(); data.setData('text/plain', t);
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, text);
+  await pasteInto(box4, 'old\nmulti');
+  await pasteInto(box4, 'replacement');
+  await box4.press('Enter');
+  assert.equal((await page.evaluate(() => window.sent)).at(-1), 'replacement', 'a paste over a locked multiline paste replaces it');
+  await page.getByRole('button', { name: 'Paste to screen', exact: true }).click();
+  const box3 =page.getByLabel('Text to send to the screen');
   await box3.evaluate(el => {
     const data = new DataTransfer(); data.setData('text/plain', 'gone\nsoon');
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));

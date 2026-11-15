@@ -357,7 +357,8 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
                   onChange={(e) => { if (pasteRaw.current !== null) e.currentTarget.value = '•'.repeat(Math.min(pasteRaw.current.length, 24)); }}
                   onPaste={(e) => {
                     const text = e.clipboardData.getData('text/plain');
-                    if (!/[\r\n]/.test(text)) return;
+                    // A paste over a locked multiline paste replaces it, so it takes this path too.
+                    if (pasteRaw.current === null && !/[\r\n]/.test(text)) return;
                     e.preventDefault();
                     pasteRaw.current = text;
                     e.currentTarget.value = '•'.repeat(Math.min(text.length, 24));
