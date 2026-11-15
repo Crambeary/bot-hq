@@ -115,6 +115,9 @@
 .screen__chin-icon:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
 .screen__chin-btn { height: 34px; padding: 0 12px; border-radius: var(--radius-full); color: inherit; font-size: 13px; font-weight: 600; white-space: nowrap; }
 .screen__chin-btn:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
+.screen__chin-input { height: 34px; width: 180px; padding: 0 12px; border-radius: var(--radius-full); border: 0; outline: 0; background: color-mix(in srgb, currentColor 16%, transparent); color: inherit; font: inherit; font-size: 13px; }
+.screen__chin-input::placeholder { color: inherit; opacity: 0.7; }
+.screen__chin-input:focus-visible { box-shadow: 0 0 0 2px currentColor; }
 .screen__handback {
   display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 8px; border-radius: var(--radius-full);
   background: var(--bot-on-action); color: var(--bot-action); font-size: 13px; font-weight: 600; line-height: 18px; white-space: nowrap;

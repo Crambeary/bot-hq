@@ -52,6 +52,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   const [resetAsk, setResetAsk] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [pasteBox, setPasteBox] = useState(false);
 
   const status = computer?.status;
   const running = status === 'running';
@@ -117,6 +118,9 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
           if (text) navigator.clipboard?.writeText(text).catch(() => {});
         });
         onPaste = (e: ClipboardEvent) => {
+          // A paste into some other field on the page (the chin's own box included) stays local.
+          const t = e.target instanceof Element ? e.target : null;
+          if (t?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !canvasRef.current?.contains(t)) return;
           const text = e.clipboardData?.getData('text/plain');
           if (text) rfb?.clipboardPasteFrom(text);
         };
@@ -182,7 +186,14 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   };
   // Ctrl+V reaches the remote desktop as a keypress, so the clipboard button is the sure way to send text over.
   const pasteToScreen = () => {
-    navigator.clipboard?.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setNote('Allow clipboard access, or press Ctrl+V.'));
+    navigator.clipboard?.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setPasteBox(true));
+  };
+  // Fallback when the browser won't let us read the clipboard: the person pastes into a local box instead.
+  const sendPasteBox = (el: HTMLInputElement) => {
+    if (el.value) rfbRef.current?.clipboardPasteFrom(el.value);
+    el.value = '';
+    setPasteBox(false);
+    setNote('Now paste on the screen (Ctrl+Shift+V in a terminal).');
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -300,6 +311,18 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
               <span>{note || hint ||'You’re driving'}</span>
             </span>
             <span className="screen__chin-actions">
+              {pasteBox && (
+                <input
+                  type="text"
+                  className="screen__chin-input"
+                  placeholder="Paste text, press Enter"
+                  aria-label="Text to send to the screen"
+                  autoFocus
+                  autoComplete="off"
+                  spellCheck={false}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
+                />
+              )}
               <button type="button" className="screen__chin-btn" onClick={pasteToScreen} title="Send your clipboard text to this screen, then paste there (Ctrl+Shift+V in a terminal)">Paste to screen</button>
               {canFullscreen && (
                 <button type="button" className="screen__chin-icon" onClick={toggleFullscreen} aria-label={fullscreen ? 'Leave full screen' : 'Full screen'} title={fullscreen ? 'Leave full screen' : 'Full screen'}>
