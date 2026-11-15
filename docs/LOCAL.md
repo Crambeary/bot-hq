@@ -141,6 +141,7 @@ Implemented and merged. Smallest slice; one display `:99`, no multi-bot.
 Acceptance:
 
 ```
+export ALLOWED_EMAILS=you@example.com  # required by compose; an exported value overrides the same key in .env
 docker compose build && docker compose up -d
 docker compose ps                      # hq healthy
 curl -fsS http://127.0.0.1:8787/api/health        # {"ok":true,"engine":"hermes"}
