@@ -21,8 +21,15 @@ rm -f /var/run/supervisor.sock
 # most 4 (MAX_SCREENS in server/src/computer.ts). Each screen is three supervisord programs. :99 starts
 # with the container; the others are started by the server when a bot first needs its screen, and
 # stopped again when that bot is deleted.
+# Same rule as env.maxBots in server/src/env.ts: decimal digits only, anything else means 4. Leading
+# zeros are dropped so bash does not read "08" as octal; more than three digits is past the cap anyway.
 max_bots="${MAX_BOTS:-4}"
-[[ "$max_bots" =~ ^[0-9]+$ ]] || max_bots=4
+if [[ "$max_bots" =~ ^0*([0-9]+)$ ]]; then
+  max_bots="${BASH_REMATCH[1]}"
+  (( ${#max_bots} <= 3 )) || max_bots=4
+else
+  max_bots=4
+fi
 screens=$(( max_bots < 1 ? 1 : (max_bots > 4 ? 4 : max_bots) ))
 displays_conf=/etc/supervisor/conf.d/hq-displays.conf
 {
