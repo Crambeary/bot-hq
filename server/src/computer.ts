@@ -297,6 +297,9 @@ export async function resetBotScreen(userId: string, botId: string): Promise<voi
 
 /** The bot is gone: stop what we ran on its screen and free the screen for the next bot. */
 export async function releaseScreen(botId: string): Promise<void> {
+  // A lease still in flight would write its screens row after this point; let it finish first, so the
+  // release sees the screen and frees it instead of leaving it marked as taken.
+  await leasing.get(botId)?.catch(() => {});
   const mine = db.prepare('SELECT screen_id, user_id FROM screens WHERE bot_id=?').get(botId) as any;
   if (!mine) return;
   db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId);
