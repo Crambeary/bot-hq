@@ -233,7 +233,14 @@ async function lease(userId: string, botId: string): Promise<BotScreen> {
   try {
     size = await startDisplay(screenId);
   } catch (e: any) {
+    // Some of its programs may have started: stop them, and keep the screen off the free list until
+    // they have, so a new bot cannot start the display while it is being stopped.
+    const stopped = stopDisplay(screenId)
+      .catch((err) => console.warn(`[computer] could not stop ${screenId}: ${err?.message ?? err}`))
+      .finally(() => releasing.delete(screenId));
+    if (screenId !== 'default') releasing.set(screenId, stopped);
     db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId);
+    await stopped;
     setStatus(userId, 'error', String(e?.message ?? e));
     throw e;
   }
