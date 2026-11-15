@@ -9,7 +9,8 @@ services:
     init: true
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8787:8787"
+      # HQ_PORT picks the host port (default 8787); set HQ_APP_URL to match, e.g. http://localhost:8788.
+      - "127.0.0.1:${HQ_PORT:-8787}:8787"
     shm_size: "2gb"
     environment:
       HQ_LOCAL: "1"

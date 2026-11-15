@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import YAML from 'yaml';
-import { displayFor } from './box.js';
+import { displayFor, hermesInstallEnv } from './box.js';
 import { cdpUrlFor, screenFor } from './computer.js';
 import { db } from './db.js';
 import { env } from './env.js';
@@ -142,6 +142,25 @@ function extraMcpServers(): Record<string, any> {
   }
 }
 
+/**
+ * Hermes keeps its Python dependency environment under <HERMES_HOME>/installs, and a home without one
+ * refuses to start ("no dependency environment is committed for this install"). The environment's
+ * paths are absolute, so a copy does not work either; a link to the primary home's does, and costs
+ * no disk. Only done when the primary home has one (the container layout, see docker/entrypoint.sh).
+ */
+function shareInstalls(home: string) {
+  const primary = path.join(env.hermesHome, 'installs');
+  const mine = path.join(home, 'installs');
+  if (!fs.existsSync(primary)) return;
+  let current: string | null = null;
+  try { current = fs.readlinkSync(mine); } catch (e: any) {
+    if (e?.code !== 'ENOENT') return; // a real folder of its own: leave it
+  }
+  if (current === primary) return;
+  if (current !== null) fs.unlinkSync(mine);
+  fs.symlinkSync(primary, mine);
+}
+
 /** Create or refresh the home. config.yaml is created once; after that only the keys we own are patched. */
 async function writeHome(botId: string): Promise<{ home: string; key: string; display: string | null }> {
   const b = botRow(botId);
@@ -149,6 +168,7 @@ async function writeHome(botId: string): Promise<{ home: string; key: string; di
   fs.mkdirSync(path.join(home, 'logs'), { recursive: true });
   fs.mkdirSync(path.join(home, 'locks'), { recursive: true });
   fs.chmodSync(home, 0o700);
+  shareInstalls(home);
 
   // Its screen decides which display and which Chrome it drives. Only meaningful on the computer itself.
   let display: string | null = null;
@@ -312,6 +332,8 @@ async function startGateway(botId: string): Promise<void> {
       // Hermes' browser tool talks to a helper process it finds under this folder. With the default
       // (one folder per HOME) every agent on the computer would end up driving the same browser.
       BH_HOME: path.join(home, 'browser-harness'),
+      // Without HERMES_RUNTIME_DIR each gateway downloads its own Python/Node/ffmpeg (~1.2 GB) into <home>/tools.
+      ...hermesInstallEnv(),
       ...(display ? { DISPLAY: display } : {}),
     },
   });

@@ -14,8 +14,51 @@ chmod 700 /run/user/0
 chmod 1777 /tmp/.X11-unix
 rm -f /run/dbus/pid /run/dbus/system_bus_socket
 
-# Stale X locks and supervisor socket from a previous run of this same container.
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99 /var/run/supervisor.sock
+# Stale supervisor socket from a previous run of this same container (hq-display.sh clears X locks).
+rm -f /var/run/supervisor.sock
+
+# One screen per bot: display :99 for the primary bot, :100.. for the others, MAX_BOTS of them but at
+# most 4 (MAX_SCREENS in server/src/computer.ts). Each screen is three supervisord programs. :99 starts
+# with the container; the others are started by the server when a bot first needs its screen, and
+# stopped again when that bot is deleted.
+# Same rule as env.maxBots in server/src/env.ts: decimal digits only, anything else means 4. Leading
+# zeros are dropped so bash does not read "08" as octal; more than three digits is past the cap anyway.
+max_bots="${MAX_BOTS:-4}"
+if [[ "$max_bots" =~ ^0*([0-9]+)$ ]]; then
+  max_bots="${BASH_REMATCH[1]}"
+  (( ${#max_bots} <= 3 )) || max_bots=4
+else
+  max_bots=4
+fi
+screens=$(( max_bots < 1 ? 1 : (max_bots > 4 ? 4 : max_bots) ))
+displays_conf=/etc/supervisor/conf.d/hq-displays.conf
+{
+  echo "; Written by docker/entrypoint.sh at container start (MAX_BOTS=$max_bots -> $screens screens). Do not edit."
+  for (( i = 0; i < screens; i++ )); do
+    n=$(( 99 + i ))
+    auto=$([ "$n" = 99 ] && echo true || echo false)
+    for part in xvfb desktop vnc; do
+      case "$part" in
+        xvfb) name="xvfb$n"; prio=20; secs=2 ;;
+        desktop) name="desktop$n"; prio=30; secs=5 ;;
+        vnc) name="x11vnc$n"; prio=40; secs=3 ;;
+      esac
+      cat <<CONF
+
+[program:$name]
+priority=$prio
+command=/usr/local/bin/hq-display.sh $part $n
+autostart=$auto
+autorestart=true
+startsecs=$secs
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/var/log/hq/sv-$name.log
+stderr_logfile=/var/log/hq/sv-$name.log
+CONF
+    done
+  done
+} >"$displays_conf"
 
 # Hermes' dependency venv lives in HERMES_HOME/installs, which the volume hides. Seed it from the image
 # (/opt/hermes-seed, see Dockerfile) on first start and whenever the pinned Hermes commit changes.

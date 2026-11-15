@@ -23,7 +23,17 @@ function shellEnv(screenId?: string | null): NodeJS.ProcessEnv {
     // hq-screen.py needs these two (supervisorctl for the home screen, no apt at run time); nothing else HQ_*.
     ...(process.env.HQ_HOME_SUPERVISOR ? { HQ_HOME_SUPERVISOR: process.env.HQ_HOME_SUPERVISOR } : {}),
     ...(process.env.HQ_NO_APT ? { HQ_NO_APT: process.env.HQ_NO_APT } : {}),
+    // Where the image keeps Hermes and its tools, so a `hermes` run from a desktop terminal (engine
+    // sign-in) uses them instead of downloading its own copy into the Hermes home.
+    ...hermesInstallEnv(),
   };
+}
+
+/** HERMES_INSTALL_DIR and HERMES_RUNTIME_DIR, when set (the Dockerfile sets both). */
+export function hermesInstallEnv(): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = {};
+  for (const k of ['HERMES_INSTALL_DIR', 'HERMES_RUNTIME_DIR'] as const) if (process.env[k]) out[k] = process.env[k];
+  return out;
 }
 
 function localBash(command: string, timeoutSec: number, screenId?: string | null): Promise<BashResult> {
