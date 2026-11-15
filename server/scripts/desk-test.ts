@@ -189,7 +189,9 @@ async function extraScreens(): Promise<string[]> {
       say(`${id}: ${s.width}x${s.height}${s.started ? ' (started)' : ''}`);
       ids.push(id);
     } catch (e: any) {
+      // A screen that would not start fails the run; the rest still runs on the screens that did.
       say(`could not start ${id}: ${e?.message ?? e}`);
+      failures++;
       break;
     }
   }

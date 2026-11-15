@@ -61,8 +61,11 @@ export const env = {
    * (e.g. http://127.0.0.1:9333). When set, we never start or stop that screen's Chrome ourselves.
    */
   primaryCdpUrl: process.env.PRIMARY_CDP_URL ?? '',
-  /** Bots that can each have a screen (Orgo allows four screens on one Linux computer). */
-  maxBots: Number(process.env.MAX_BOTS ?? 4),
+  /**
+   * Bots that can each have a screen; screens cap at four (MAX_SCREENS in computer.ts). Same rule as
+   * docker/entrypoint.sh: digits only, anything else means 4.
+   */
+  maxBots: /^\d+$/.test(process.env.MAX_BOTS ?? '') ? Number(process.env.MAX_BOTS) : 4,
   /** Comma-separated emails allowed to sign in; empty = anyone who can reach the app. */
   allowedEmails: (process.env.ALLOWED_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   libRoot: process.env.LIB_ROOT ?? '/root/grokbot/files',

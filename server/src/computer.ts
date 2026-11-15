@@ -84,8 +84,31 @@ function portOpen(port: number, timeoutMs = 1000): Promise<boolean> {
 /** VNC port of a screen's display (vnc.ts has the same rule; kept here to avoid an import cycle). */
 const vncPort = (screenId: string) => 5900 + Number(displayFor(screenId).slice(1)) - 99;
 
+/** Is the screen's XFCE session program running? Xvfb and x11vnc can be up while it is not. */
+async function desktopRunning(screenId: string): Promise<boolean> {
+  const r = await box.bash(`supervisorctl status ${programsFor(screenId)[1]} 2>&1`, 15);
+  return /\sRUNNING\s/.test(r.output);
+}
+
+/** A display is ready when its X server, its desktop and its VNC port all answer. */
+async function displayReady(screenId: string): Promise<{ width: number; height: number } | null> {
+  const size = await probeDisplay(screenId);
+  if (!size || !(await portOpen(vncPort(screenId))) || !(await desktopRunning(screenId))) return null;
+  return size;
+}
+
+/**
+ * Errors in `supervisorctl start a b c` output. Each program gets its own line ("name: started" or
+ * "name: ERROR (...)"); "already started" is fine for the program that reports it, nothing else is.
+ */
+export function startErrors(output: string): string[] {
+  return output.split('\n').map((l) => l.trim()).filter((l) => /ERROR|no such process/i.test(l) && !/ERROR \(already started\)/i.test(l));
+}
+
 type DisplaySize = { width: number; height: number; started: boolean };
 const starting = new Map<string, Promise<DisplaySize>>();
+/** Screens whose bot is being removed: kept off the free list until undress and stop are done. */
+const releasing = new Map<string, Promise<void>>();
 
 /**
  * Bring up a screen's display (Xvfb + XFCE + x11vnc) if it is not running, and wait until both the
@@ -95,7 +118,8 @@ const starting = new Map<string, Promise<DisplaySize>>();
 export function startDisplay(screenId: string): Promise<DisplaySize> {
   let p = starting.get(screenId);
   if (!p) {
-    p = bringUp(screenId).finally(() => starting.delete(screenId));
+    // Never start while the screen's previous bot is still being cleared off it: the pending stop would take this start down.
+    p = (releasing.get(screenId) ?? Promise.resolve()).then(() => bringUp(screenId)).finally(() => starting.delete(screenId));
     starting.set(screenId, p);
   }
   return p;
@@ -105,20 +129,20 @@ async function bringUp(screenId: string): Promise<DisplaySize> {
   if (screenId !== 'default' && !extraScreens().includes(screenId)) {
     throw new Error(`${screenId} is not one of this computer's screens (MAX_BOTS=${env.maxBots}, at most ${MAX_SCREENS}).`);
   }
-  let size = await probeDisplay(screenId);
-  if (size && (await portOpen(vncPort(screenId)))) return { ...size, started: false };
+  let size = await displayReady(screenId);
+  if (size) return { ...size, started: false };
   {
     // `supervisorctl start` returns once each program has stayed up for its startsecs; it is a no-op
     // for one already running. The default screen starts with the container, but this also revives it.
     const programs = programsFor(screenId);
     const r = await box.bash(`supervisorctl start ${programs.join(' ')} 2>&1`, 90);
-    if (/ERROR|no such process/i.test(r.output) && !/already started/i.test(r.output)) {
-      throw new Error(`Could not start the desktop for ${screenId} (display ${displayFor(screenId)}): ${r.output.trim().slice(-300)}`);
+    const errors = startErrors(r.output);
+    if (errors.length) {
+      throw new Error(`Could not start the desktop for ${screenId} (display ${displayFor(screenId)}): ${errors.join('; ').slice(-300)}`);
     }
     for (let i = 0; i < 60; i++) {
-      size = await probeDisplay(screenId);
-      if (size && (await portOpen(vncPort(screenId)))) break;
-      size = null;
+      size = await displayReady(screenId);
+      if (size) break;
       await new Promise((res) => setTimeout(res, 500));
     }
     if (!size) throw new Error(`The desktop for ${screenId} (display ${displayFor(screenId)}) did not come up; see /var/log/hq/sv-${programs[0]}.log.`);
@@ -199,7 +223,7 @@ async function lease(userId: string, botId: string): Promise<BotScreen> {
   let screenId = 'default';
   if (!isPrimaryEngine(botId)) {
     // Extra screens are :100, :101, ... (screen-100, screen-101, ...); the default one is the primary's.
-    const free = extraScreens().find((sid) => !taken.has(sid));
+    const free = extraScreens().find((sid) => !taken.has(sid) && !releasing.has(sid));
     if (!free) throw new Error(`Every screen on the computer is in use (${screenLimit()}: MAX_BOTS=${env.maxBots}, at most ${MAX_SCREENS}). Remove a bot to free one.`);
     screenId = free;
   }
@@ -279,9 +303,17 @@ export async function releaseScreen(botId: string): Promise<void> {
   dressing.delete(botId);
   verified.delete(botId);
   if (mine.screen_id !== 'default') {
-    try { await undressScreen(botId, mine.screen_id); } catch (e: any) { console.warn(`[computer] undress failed: ${e?.message ?? e}`); }
-    // Nobody else is on that screen (one bot per screen): give its memory back until the next bot.
-    if (!db.prepare('SELECT 1 FROM screens WHERE screen_id=?').get(mine.screen_id)) await stopDisplay(mine.screen_id);
+    const sid: string = mine.screen_id;
+    // Keep the screen off the free list until it is undressed and stopped, so a new bot cannot get it
+    // halfway through (undress would strip the new bot's desktop, the stop would take its display down).
+    const done = (async () => {
+      await starting.get(sid)?.catch(() => {});
+      try { await undressScreen(botId, sid); } catch (e: any) { console.warn(`[computer] undress failed: ${e?.message ?? e}`); }
+      // Nobody else is on that screen (one bot per screen): give its memory back until the next bot.
+      if (!db.prepare('SELECT 1 FROM screens WHERE screen_id=?').get(sid)) await stopDisplay(sid);
+    })().finally(() => releasing.delete(sid));
+    releasing.set(sid, done);
+    await done;
   }
   hub.emit(mine.user_id, { type: 'computer', state: computerState(mine.user_id) });
 }

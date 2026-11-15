@@ -1,6 +1,6 @@
 # Running bot-hq fully locally (spec)
 
-Status: Phases 1 and 2 implemented and verified on a real container (results under each phase in section 4). Phases 3 and 4 are still a proposal against the current tree.
+Status: Phase 1 implemented and verified. Phase 2 implemented and verified on a real container except the per-bot message round trip, which needs a provider sign-in on each bot (results and what is still open under Phase 2 in section 4). Phases 3 and 4 are still a proposal against the current tree.
 
 ## 1. Goal and scope
 
@@ -181,7 +181,7 @@ Result (run with `MAX_BOTS=3` beside another instance, so `HQ_PORT=8788 HQ_APP_U
 - Persistence: after `docker compose restart hq` and after `down && up` (volumes kept), the session was still valid, every bot came back on the same display (restarted on demand and dressed again) and all gateways answered `/health`.
 - Logs: no Orgo/Composio/xAI lines in `/var/log/hq/*.log` or `docker logs`. `XAI_API_KEY` appears by name only in Hermes' own plugin manifests and bundled skill docs, in no `.env`.
 - `server/scripts/desk-test.ts` now uses the local backend (`box.screenshot`, `startDisplay`); it type-checks in the image. It was not run against this instance, because it dresses the extra screens for made-up bots and real bots were using them.
-- Round trip: each bot's turn reaches its own gateway; replies need a provider sign-in per bot (section 4, Phase 3 item 1). The gateway reads `model.provider` per turn (claims table), so signing in needs no engine restart.
+- Round trip: NOT yet verified. Each bot's turn reaches its own gateway (it answered with its "no provider" and then "no Anthropic credentials" errors), but a real reply, and a reply after restart, need a provider sign-in per bot (section 4, Phase 3 item 1). The gateway reads `model.provider` per turn (claims table), so signing in needs no engine restart.
 
 ### Phase 3: Claude OAuth, hardening, UI polish
 
