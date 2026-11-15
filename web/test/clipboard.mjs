@@ -109,8 +109,9 @@ try {
   assert.equal(await paste('canvas'), true);
   assert.equal(await count('sent'), 3, 'switching modes leaves only one listener');
   // Multiline text pasted into the masked fallback box keeps its newline (a password input would strip it).
+  await page.evaluate(() => { window.clipboard = undefined; });
   await page.getByRole('button', { name: 'Paste to screen', exact: true }).click();
-  const box = page.getByLabel('Text to send to the screen');
+  const box =page.getByLabel('Text to send to the screen');
   await box.evaluate(el => {
     const data = new DataTransfer(); data.setData('text/plain', 'first\nsecond');
     el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
