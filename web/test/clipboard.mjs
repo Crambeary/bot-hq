@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 
@@ -22,8 +23,8 @@ window.render = (paused = false) => root.render(React.createElement(ComputerScre
 window.emit = (type, detail) => window.rfbs.at(-1).dispatchEvent(new CustomEvent(type, { detail }));
 window.render();`;
 const server = await createServer({
-  root: new URL('..', import.meta.url).pathname,
-  configFile: new URL('../vite.config.ts', import.meta.url).pathname,
+  root: fileURLToPath(new URL('..', import.meta.url)),
+  configFile: fileURLToPath(new URL('../vite.config.ts', import.meta.url)),
   server: { port: 5199, strictPort: true },
   plugins: [{ name: 'clipboard-test', enforce: 'pre',
     resolveId(id) { if (id === '@novnc/novnc') return '\0fake-rfb'; if (id === '/clipboard-test-entry.js') return '\0clipboard-test-entry'; },
@@ -66,9 +67,9 @@ try {
   await page.evaluate(() => window.finishWrite());
   await copy.waitFor();
   await page.evaluate(() => { window.clipboard = undefined; });
-  await emit('clipboard', { text: 'selectable fixture' });
+  await emit('clipboard', { text: 'selectable\nfixture' });
   await copy.click();
-  assert.equal(await page.getByLabel('Text copied on the screen').inputValue(), 'selectable fixture');
+  assert.equal(await page.getByLabel('Text copied on the screen').inputValue(), 'selectable\nfixture', 'the copy fallback keeps line breaks');
   await page.getByRole('button', { name: 'Paste to screen', exact: true }).click();
   await page.getByLabel('Text to send to the screen').fill('local fixture');
   await page.getByLabel('Text to send to the screen').press('Enter');

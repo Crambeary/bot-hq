@@ -342,7 +342,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
             <span className="screen__chin-actions">
               {pendingCopy && conn === 'connected' && (
                 <>
-                  {copyBox && <input className="screen__chin-input" aria-label="Text copied on the screen" readOnly autoFocus value={pendingCopy.text} onFocus={(e) => e.currentTarget.select()} />}
+                  {copyBox && <textarea className="screen__chin-input screen__chin-input--area" aria-label="Text copied on the screen" readOnly autoFocus rows={1} value={pendingCopy.text} onFocus={(e) => e.currentTarget.select()} />}
                   <button type="button" className="screen__chin-btn" onClick={copyFromScreen}>Copy from screen</button>
                 </>
               )}
