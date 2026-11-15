@@ -53,6 +53,8 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   const [resetting, setResetting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [pasteBox, setPasteBox] = useState(false);
+  const [pendingCopy, setPendingCopy] = useState<{ text: string } | null>(null);
+  const [copyBox, setCopyBox] = useState(false);
 
   const status = computer?.status;
   const running = status === 'running';
@@ -91,12 +93,14 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   }, []);
 
   useEffect(() => {
+    const clearClipboard = () => { setPasteBox(false); setPendingCopy(null); setCopyBox(false); setNote(null); };
+    clearClipboard();
     if (!wantLive || !canvasRef.current) { setConn('idle'); return; }
     let disposed = false;
     let rfb: RFBType | null = null;
     let onPaste: ((e: ClipboardEvent) => void) | null = null;
     setConn('connecting');
-    setPasteBox(false);
+    let connected = false;
     (async () => {
       const { default: RFB } = await import('@novnc/novnc');
       if (disposed || !canvasRef.current) return;
@@ -108,22 +112,21 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
       rfb.resizeSession = false;
       rfb.background = 'transparent';
       rfb.focusOnClick = mode === 'control';
-      rfb.addEventListener('connect', () => { if (!disposed) { hadFrame.current = true; setConn('connected'); if (mode === 'control') rfb?.focus(); } });
-      rfb.addEventListener('disconnect', (e) => { if (!disposed) setConn((e as CustomEvent<{ clean: boolean }>).detail?.clean ? 'disconnected' : 'error'); });
-      rfb.addEventListener('securityfailure', () => { if (!disposed) setConn('error'); });
+      rfb.addEventListener('connect', () => { if (!disposed) { connected = true; hadFrame.current = true; setConn('connected'); if (mode === 'control') rfb?.focus(); } });
+      rfb.addEventListener('disconnect', (e) => { if (!disposed) { connected = false; rfbRef.current = null; clearClipboard(); if (onPaste) document.removeEventListener('paste', onPaste); setConn((e as CustomEvent<{ clean: boolean }>).detail?.clean ? 'disconnected' : 'error'); } });
+      rfb.addEventListener('securityfailure', () => { if (!disposed) { connected = false; rfbRef.current = null; clearClipboard(); if (onPaste) document.removeEventListener('paste', onPaste); setConn('error'); } });
       if (mode === 'control') {
-        // Clipboard bridge: text copied in the remote app lands on this browser's clipboard, and text pasted
-        // here reaches the remote one (the sign-in code a terminal on the screen waits for).
+        // Remote text stays local to this connection until the person explicitly copies it.
         rfb.addEventListener('clipboard', (e) => {
           const text = (e as CustomEvent<{ text: string }>).detail?.text;
-          if (text) navigator.clipboard?.writeText(text).catch(() => {});
+          if (!disposed && connected) { setPendingCopy(text ? { text } : null); setCopyBox(false); }
         });
         onPaste = (e: ClipboardEvent) => {
           // A paste into some other field on the page (the chin's own box included) stays local.
           const t = e.target instanceof Element ? e.target : null;
-          if (t?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !canvasRef.current?.contains(t)) return;
+          if (disposed || !connected || !t || !canvasRef.current?.contains(t)) return;
           const text = e.clipboardData?.getData('text/plain');
-          if (text) rfb?.clipboardPasteFrom(text);
+          if (text) { e.preventDefault(); rfb?.clipboardPasteFrom(text); }
         };
         document.addEventListener('paste', onPaste);
       }
@@ -132,7 +135,8 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     const el = canvasRef.current;
     return () => {
       disposed = true;
-      setPasteBox(false);
+      connected = false;
+      clearClipboard();
       if (onPaste) document.removeEventListener('paste', onPaste);
       try { rfb?.disconnect(); } catch { /* already closed */ }
       rfbRef.current = null;
@@ -188,19 +192,29 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   };
   // Ctrl+V reaches the remote desktop as a keypress, so the clipboard button is the sure way to send text over.
   const pasteToScreen = () => {
-    if (conn !== 'connected') { setNote('Not connected'); return; }
+    if (!driving || conn !== 'connected' || !rfbRef.current) { setNote('Not connected'); return; }
     // No clipboard API (an insecure origin): go straight to the paste box.
     if (!navigator.clipboard?.readText) { setPasteBox(true); return; }
-    navigator.clipboard.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setPasteBox(true));
+    const rfb = rfbRef.current;
+    navigator.clipboard.readText().then((text) => { if (text && rfbRef.current === rfb) rfb.clipboardPasteFrom(text); }).catch(() => { if (rfbRef.current === rfb) setPasteBox(true); });
   };
   // Fallback when the browser won't let us read the clipboard: the person pastes into a local box instead.
   const sendPasteBox = (el: HTMLInputElement) => {
-    // noVNC ignores a paste while disconnected: keep the text so it can be sent once the screen is back.
-    if (conn !== 'connected') { setNote('Not connected'); return; }
+    // Only send to the active control connection.
+    if (!driving || conn !== 'connected' || !rfbRef.current) { setNote('Not connected'); return; }
     if (el.value) rfbRef.current?.clipboardPasteFrom(el.value);
     el.value = '';
     setPasteBox(false);
     setNote('Sent. Now paste on the screen (Ctrl+Shift+V in a terminal).');
+  };
+  const copyFromScreen = async () => {
+    const rfb = rfbRef.current;
+    if (!driving || conn !== 'connected' || !rfb || !pendingCopy) return;
+    if (!navigator.clipboard?.writeText) { setCopyBox(true); return; }
+    try {
+      await navigator.clipboard.writeText(pendingCopy.text);
+      if (rfbRef.current === rfb) setPendingCopy((current) => current === pendingCopy ? null : current);
+    } catch { if (rfbRef.current === rfb) setCopyBox(true); }
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -318,6 +332,12 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
               <span>{note || hint ||'You’re driving'}</span>
             </span>
             <span className="screen__chin-actions">
+              {pendingCopy && conn === 'connected' && (
+                <>
+                  {copyBox && <input className="screen__chin-input" aria-label="Text copied on the screen" readOnly value={pendingCopy.text} onFocus={(e) => e.currentTarget.select()} />}
+                  <button type="button" className="screen__chin-btn" onClick={copyFromScreen}>Copy from screen</button>
+                </>
+              )}
               {pasteBox && (
                 <input
                   type="password"
