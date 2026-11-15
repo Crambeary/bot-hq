@@ -108,6 +108,15 @@ try {
   assert.equal(await page.getByLabel('Text to send to the screen').count(), 0);
   assert.equal(await paste('canvas'), true);
   assert.equal(await count('sent'), 3, 'switching modes leaves only one listener');
+  // Multiline text pasted into the masked fallback box keeps its newline (a password input would strip it).
+  await page.getByRole('button', { name: 'Paste to screen', exact: true }).click();
+  const box = page.getByLabel('Text to send to the screen');
+  await box.evaluate(el => {
+    const data = new DataTransfer(); data.setData('text/plain', 'first\nsecond');
+    el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  });
+  await box.press('Enter');
+  assert.deepEqual((await page.evaluate(() => window.sent)).at(-1), 'first\nsecond', 'multiline paste fallback is not flattened');
   await page.evaluate(() => window.render(true));
   await page.waitForSelector('.is-paused');
   assert.equal(await paste('.screen__canvas'), false);

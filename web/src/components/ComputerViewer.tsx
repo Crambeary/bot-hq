@@ -53,6 +53,9 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   const [resetting, setResetting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [pasteBox, setPasteBox] = useState(false);
+  // A password input strips newlines, so a multiline paste into the fallback box is kept here, unflattened.
+  const pasteRaw = useRef<string | null>(null);
+  useEffect(() => { if (!pasteBox) pasteRaw.current = null; }, [pasteBox]);
   const [pendingCopy, setPendingCopy] = useState<{ text: string } | null>(null);
   const [copyBox, setCopyBox] = useState(false);
 
@@ -202,8 +205,10 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   const sendPasteBox = (el: HTMLInputElement) => {
     // Only send to the active control connection.
     if (!driving || conn !== 'connected' || !rfbRef.current) { setNote('Not connected'); return; }
-    const sent = !!el.value;
-    if (sent) rfbRef.current.clipboardPasteFrom(el.value);
+    const text = pasteRaw.current ?? el.value;
+    const sent = !!text;
+    if (sent) rfbRef.current.clipboardPasteFrom(text);
+    pasteRaw.current = null;
     el.value = '';
     setPasteBox(false);
     // noVNC only takes keys while its canvas has focus, so hand focus back for the paste keypress.
@@ -348,6 +353,14 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
                   placeholder="Paste text (hidden), press Enter"
                   aria-label="Text to send to the screen"
                   autoFocus
+                  onChange={() => { pasteRaw.current = null; }}
+                  onPaste={(e) => {
+                    const text = e.clipboardData.getData('text/plain');
+                    if (!/[\r\n]/.test(text)) return;
+                    e.preventDefault();
+                    pasteRaw.current = text;
+                    e.currentTarget.value = '•'.repeat(Math.min(text.length, 24));
+                  }}
                   autoComplete="off"
                   data-1p-ignore
                   data-lpignore="true"
