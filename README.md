@@ -134,6 +134,8 @@ Then delete the public URL in Orgo. Screens of the other bots are released when 
 
 ## Run it locally
 
+To run everything in one Docker container on your own machine (no Orgo account), see [docs/LOCAL.md](docs/LOCAL.md).
+
 You need **Node.js 22 or newer** and a Hermes gateway with its API server on (`API_SERVER_KEY` in `~/.hermes/.env`).
 
 ```bash
@@ -178,7 +180,7 @@ server/box/         what runs on the computer to dress a screen (desktop, dock, 
 web/src/            chat, bot settings, app connections, computer viewer, voice
 scripts/            pack, install, Hermes config helper, sign-in link
 tests/              Playwright end-to-end test
-docs/               architecture; the Orgo and xAI/Composio guides predate the Hermes engine
+docs/               architecture; LOCAL.md (local Docker build); the Orgo and xAI/Composio guides predate the Hermes engine
 ```
 
 ## Status and limits

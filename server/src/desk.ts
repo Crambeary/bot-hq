@@ -8,8 +8,8 @@ import { box, displayFor } from './box.js';
  * A soft wallpaper in the bot's colour, no taskbar, a small dock, a light maximized Chrome, and a
  * home screen (the bot's avatar, a clock, the computer's apps) as Chrome's new tab page.
  *
- * The work on the computer is done by the scripts in server/box/, which this file installs under
- * /opt/hq and then calls with one short command per action. Only `box.*` is used to reach the
+ * The work on the computer is done by the scripts in server/box/, which are baked into the image
+ * at /opt/hq (nothing is copied at runtime); this file calls them with one short command per action. Only `box.*` is used to reach the
  * computer, so it runs on the local machine.
  */
 
@@ -70,7 +70,7 @@ function parseReply(output: string): Reply {
   return { kind: 'NONE', rest: '', raw: output };
 }
 
-/** One call to hq-screen.py. A missing or failing script answers NOBASE so the caller can install it. */
+/** One call to hq-screen.py. A missing or failing script answers NOBASE. */
 async function script(args: string[], screenId?: string, timeoutSec = 60): Promise<Reply> {
   const cmd = `[ -f ${SCRIPT} ] && python3 ${SCRIPT} ${args.map(box.quote).join(' ')} 2>&1 || echo HQ_NOBASE`;
   const r = await box.bash(cmd, timeoutSec, screenId);
