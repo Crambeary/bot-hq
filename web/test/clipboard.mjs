@@ -55,6 +55,7 @@ try {
   await copy.click();
   await copy.waitFor({ state: 'detached' });
   assert.equal(await count('writes'), 1);
+  assert.deepEqual(await page.evaluate(() => window.writes), ['remote fixture'], 'the clicked copy writes exactly the remote text');
   await page.evaluate(() => { window.clipboard.writeText = () => Promise.reject(new Error('denied')); });
   await emit('clipboard', { text: 'denied fixture' });
   await copy.click();
@@ -72,6 +73,7 @@ try {
   await page.getByLabel('Text to send to the screen').fill('local fixture');
   await page.getByLabel('Text to send to the screen').press('Enter');
   assert.equal(await count('sent'), 1);
+  assert.deepEqual(await page.evaluate(() => window.sent), ['local fixture'], 'the paste box sends exactly what was typed');
   const paste = selector => page.evaluate(sel => {
     const data = new DataTransfer(); data.setData('text/plain', 'paste fixture');
     const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data });

@@ -196,16 +196,19 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
     // No clipboard API (an insecure origin): go straight to the paste box.
     if (!navigator.clipboard?.readText) { setPasteBox(true); return; }
     const rfb = rfbRef.current;
-    navigator.clipboard.readText().then((text) => { if (text && rfbRef.current === rfb) rfb.clipboardPasteFrom(text); }).catch(() => { if (rfbRef.current === rfb) setPasteBox(true); });
+    navigator.clipboard.readText().then((text) => { if (text && rfbRef.current === rfb) { rfb.clipboardPasteFrom(text); rfb.focus(); } }).catch(() => { if (rfbRef.current === rfb) setPasteBox(true); });
   };
   // Fallback when the browser won't let us read the clipboard: the person pastes into a local box instead.
   const sendPasteBox = (el: HTMLInputElement) => {
     // Only send to the active control connection.
     if (!driving || conn !== 'connected' || !rfbRef.current) { setNote('Not connected'); return; }
-    if (el.value) rfbRef.current?.clipboardPasteFrom(el.value);
+    const sent = !!el.value;
+    if (sent) rfbRef.current.clipboardPasteFrom(el.value);
     el.value = '';
     setPasteBox(false);
-    setNote('Sent. Now paste on the screen (Ctrl+Shift+V in a terminal).');
+    // noVNC only takes keys while its canvas has focus, so hand focus back for the paste keypress.
+    rfbRef.current.focus();
+    if (sent) setNote('Sent. Now paste on the screen (Ctrl+Shift+V in a terminal).');
   };
   const copyFromScreen = async () => {
     const rfb = rfbRef.current;
@@ -334,7 +337,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
             <span className="screen__chin-actions">
               {pendingCopy && conn === 'connected' && (
                 <>
-                  {copyBox && <input className="screen__chin-input" aria-label="Text copied on the screen" readOnly value={pendingCopy.text} onFocus={(e) => e.currentTarget.select()} />}
+                  {copyBox && <input className="screen__chin-input" aria-label="Text copied on the screen" readOnly autoFocus value={pendingCopy.text} onFocus={(e) => e.currentTarget.select()} />}
                   <button type="button" className="screen__chin-btn" onClick={copyFromScreen}>Copy from screen</button>
                 </>
               )}
