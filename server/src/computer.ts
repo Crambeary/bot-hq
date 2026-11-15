@@ -2,18 +2,29 @@ import { db, now } from './db.js';
 import { env } from './env.js';
 import { hub } from './lib/hub.js';
 import { cdpPortFor, dressScreen, resetScreen, undressScreen, type DeskBot } from './desk.js';
+import net from 'node:net';
 import { box, displayFor } from './box.js';
 import type { ComputerState } from './types.js';
 
 /**
  * The local computer: Xvfb displays inside this container, one screen per bot. The primary bot's
- * engine lives on the default display (:99, started by supervisord); every other bot gets a display
- * of its own (screen-100 -> :100 ...), dressed in its colour (see desk.ts). Nothing here creates,
- * suspends or deletes a display: they are brought up by the container.
+ * engine lives on the default display (:99, started with the container); every other bot gets a
+ * display of its own (screen-100 -> :100 ...), dressed in its colour (see desk.ts).
+ *
+ * Each display is three supervisord programs (Xvfb, its XFCE session, x11vnc), written by
+ * docker/entrypoint.sh for as many screens as MAX_BOTS allows. The allocator below starts a bot's
+ * display the first time it is needed (or again after the container restarted) and stops it when the
+ * bot is deleted.
  */
 
-/** Screens on the computer, the default one included. */
+/** Screens on the computer, the default one included. docker/entrypoint.sh caps its displays at the same number. */
 export const MAX_SCREENS = 4;
+
+/** Screens this computer runs: one per bot, MAX_BOTS of them, but never more than MAX_SCREENS. */
+export const screenLimit = () => Math.max(1, Math.min(env.maxBots, MAX_SCREENS));
+
+/** The extra screens, in the order they are handed out: screen-100 (:100), screen-101 (:101), ... */
+const extraScreens = () => Array.from({ length: screenLimit() - 1 }, (_, i) => `screen-${100 + i}`);
 
 export interface BotScreen { computerId: string; screenId: string; width?: number; height?: number }
 
@@ -42,7 +53,7 @@ export function computerState(userId: string): ComputerState {
     screenId: s.screen_id as string,
     ...(s.width && s.height ? { width: s.width as number, height: s.height as number } : {}),
   }));
-  return { status: r.status, error: r.error, screens, maxScreens: Math.min(env.maxBots, MAX_SCREENS) };
+  return { status: r.status, error: r.error, screens, maxScreens: screenLimit() };
 }
 
 /** Is the X display for this screen answering? Returns its size when it is. */
@@ -51,6 +62,76 @@ async function probeDisplay(screenId: string): Promise<{ width: number; height: 
   if (r.exit_code !== 0) return null;
   const m = /dimensions:\s+(\d+)x(\d+) pixels/.exec(r.output);
   return { width: m ? Number(m[1]) : 0, height: m ? Number(m[2]) : 0 };
+}
+
+/** Supervisord program names of a screen's display: Xvfb, its desktop, its VNC server. */
+const programsFor = (screenId: string) => {
+  const n = displayFor(screenId).slice(1);
+  return [`xvfb${n}`, `desktop${n}`, `x11vnc${n}`];
+};
+
+/** Does something accept connections on this loopback port? */
+function portOpen(port: number, timeoutMs = 1000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const s = net.connect({ host: '127.0.0.1', port });
+    const done = (ok: boolean) => { s.destroy(); resolve(ok); };
+    s.setTimeout(timeoutMs, () => done(false));
+    s.once('connect', () => done(true));
+    s.once('error', () => done(false));
+  });
+}
+
+/** VNC port of a screen's display (vnc.ts has the same rule; kept here to avoid an import cycle). */
+const vncPort = (screenId: string) => 5900 + Number(displayFor(screenId).slice(1)) - 99;
+
+type DisplaySize = { width: number; height: number; started: boolean };
+const starting = new Map<string, Promise<DisplaySize>>();
+
+/**
+ * Bring up a screen's display (Xvfb + XFCE + x11vnc) if it is not running, and wait until both the
+ * X server and its VNC port answer. Returns the display's size, and whether it had to be started.
+ * Concurrent calls share one start.
+ */
+export function startDisplay(screenId: string): Promise<DisplaySize> {
+  let p = starting.get(screenId);
+  if (!p) {
+    p = bringUp(screenId).finally(() => starting.delete(screenId));
+    starting.set(screenId, p);
+  }
+  return p;
+}
+
+async function bringUp(screenId: string): Promise<DisplaySize> {
+  if (screenId !== 'default' && !extraScreens().includes(screenId)) {
+    throw new Error(`${screenId} is not one of this computer's screens (MAX_BOTS=${env.maxBots}, at most ${MAX_SCREENS}).`);
+  }
+  let size = await probeDisplay(screenId);
+  if (size && (await portOpen(vncPort(screenId)))) return { ...size, started: false };
+  {
+    // `supervisorctl start` returns once each program has stayed up for its startsecs; it is a no-op
+    // for one already running. The default screen starts with the container, but this also revives it.
+    const programs = programsFor(screenId);
+    const r = await box.bash(`supervisorctl start ${programs.join(' ')} 2>&1`, 90);
+    if (/ERROR|no such process/i.test(r.output) && !/already started/i.test(r.output)) {
+      throw new Error(`Could not start the desktop for ${screenId} (display ${displayFor(screenId)}): ${r.output.trim().slice(-300)}`);
+    }
+    for (let i = 0; i < 60; i++) {
+      size = await probeDisplay(screenId);
+      if (size && (await portOpen(vncPort(screenId)))) break;
+      size = null;
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    if (!size) throw new Error(`The desktop for ${screenId} (display ${displayFor(screenId)}) did not come up; see /var/log/hq/sv-${programs[0]}.log.`);
+    console.log(`[computer] started display ${displayFor(screenId)} for ${screenId}`);
+  }
+  return { ...size, started: true };
+}
+
+/** Stop a screen's display (an extra screen whose bot is gone). The default screen is never stopped. */
+async function stopDisplay(screenId: string): Promise<void> {
+  if (screenId === 'default') return;
+  const r = await box.bash(`supervisorctl stop ${[...programsFor(screenId)].reverse().join(' ')} 2>&1`, 60);
+  if (/ERROR/.test(r.output) && !/not running/i.test(r.output)) console.warn(`[computer] could not stop ${screenId}: ${r.output.trim().slice(-200)}`);
 }
 
 /** The computer is always on; this only records that for the UI. Returns the computer's id. */
@@ -96,14 +177,20 @@ async function lease(userId: string, botId: string): Promise<BotScreen> {
       db.prepare('UPDATE screens SET last_used_at=? WHERE bot_id=?').run(now(), botId);
       return { computerId: id, screenId: mine.screen_id, width: mine.width ?? undefined, height: mine.height ?? undefined };
     }
-    const s = await probeDisplay(mine.screen_id);
+    // Keep the bot on the screen it had (same display, same Chrome port); start its display if the
+    // container restarted since. A screen beyond what this computer runs now (MAX_BOTS went down) is
+    // given up and the bot leases again below.
+    const s = await startDisplay(mine.screen_id).catch((e) => {
+      console.warn(`[computer] ${botId} lost ${mine.screen_id}: ${e?.message ?? e}`);
+      return null;
+    });
     if (s) {
+      if (s.started) dressing.delete(botId); // a fresh desktop is bare: dress it again
       verified.set(botId, Date.now());
       saveSize(botId, s);
       db.prepare('UPDATE screens SET last_used_at=? WHERE bot_id=?').run(now(), botId);
       return { computerId: id, screenId: mine.screen_id, width: s.width || mine.width || undefined, height: s.height || mine.height || undefined };
     }
-    // The display is gone (the container restarted): lease again below.
     db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId);
     dressing.delete(botId);
   }
@@ -112,20 +199,21 @@ async function lease(userId: string, botId: string): Promise<BotScreen> {
   let screenId = 'default';
   if (!isPrimaryEngine(botId)) {
     // Extra screens are :100, :101, ... (screen-100, screen-101, ...); the default one is the primary's.
-    const free = Array.from({ length: MAX_SCREENS - 1 }, (_, i) => `screen-${100 + i}`).find((sid) => !taken.has(sid));
-    if (!free) throw new Error(`Every screen on the computer is in use (${MAX_SCREENS} at most). Remove a bot to free one.`);
+    const free = extraScreens().find((sid) => !taken.has(sid));
+    if (!free) throw new Error(`Every screen on the computer is in use (${screenLimit()}: MAX_BOTS=${env.maxBots}, at most ${MAX_SCREENS}). Remove a bot to free one.`);
     screenId = free;
   }
   // Reserve the screen before the first await so a concurrent lease sees it as taken.
   db.prepare('INSERT OR REPLACE INTO screens(bot_id,user_id,screen_id,last_used_at) VALUES (?,?,?,?)').run(botId, userId, screenId, now());
-  let size: Awaited<ReturnType<typeof probeDisplay>>;
-  try { size = await probeDisplay(screenId); } catch (e) { db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId); throw e; }
-  if (!size) {
+  let size: DisplaySize;
+  try {
+    size = await startDisplay(screenId);
+  } catch (e: any) {
     db.prepare('DELETE FROM screens WHERE bot_id=?').run(botId);
-    const msg = `The desktop for ${screenId} (display ${displayFor(screenId)}) is not running. It is started with the container; check the supervisord logs.`;
-    setStatus(userId, 'error', msg);
-    throw new Error(msg);
+    setStatus(userId, 'error', String(e?.message ?? e));
+    throw e;
   }
+  dressing.delete(botId);
   if (rowFor(userId).status !== 'running') setStatus(userId, 'running');
   db.prepare('INSERT OR REPLACE INTO screens(bot_id,user_id,screen_id,last_used_at,width,height) VALUES (?,?,?,?,?,?)').run(botId, userId, screenId, now(), size.width || null, size.height || null);
   verified.set(botId, Date.now());
@@ -192,6 +280,8 @@ export async function releaseScreen(botId: string): Promise<void> {
   verified.delete(botId);
   if (mine.screen_id !== 'default') {
     try { await undressScreen(botId, mine.screen_id); } catch (e: any) { console.warn(`[computer] undress failed: ${e?.message ?? e}`); }
+    // Nobody else is on that screen (one bot per screen): give its memory back until the next bot.
+    if (!db.prepare('SELECT 1 FROM screens WHERE screen_id=?').get(mine.screen_id)) await stopDisplay(mine.screen_id);
   }
   hub.emit(mine.user_id, { type: 'computer', state: computerState(mine.user_id) });
 }

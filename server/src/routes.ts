@@ -9,7 +9,7 @@ import { createSession, destroySession, isOwnerKey, requireUser, userFromCookieH
 import { allLive, appendRow, clearConversation, emitBot, getBot, getBotRow, getRow, listBots, listRoutines, listRows, listTasks, toRoutine, updateRow } from './store.js';
 import { enqueue, interrupt, resolveApproval } from './agent/loop.js';
 import { box } from './box.js';
-import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, suspendComputer } from './computer.js';
+import { computerState, ensureComputer, forgetBotFiles, readyScreen, refreshComputer, releaseScreen, screenLimit, suspendComputer } from './computer.js';
 import { assignEngine, provisionEngine, removeEngine, syncPersona } from './engine.js';
 import { deleteMemory, listMemories, memoryBot } from './engine-memory.js';
 import { catalog, connectedToolkits, deleteConnection, disconnect, googleProfile, startConnect, startGoogleLogin, toolkitInfo } from './composio.js';
@@ -37,7 +37,8 @@ const agentCount = () => (db.prepare("SELECT COUNT(*) n FROM bots WHERE COALESCE
 
 function createBot(userId: string, b: { name: string; label?: string; description?: string; instructions?: string; avatarShape?: string; avatarColor?: string; mode?: string; isPrimary?: boolean }) {
   // Every bot needs a screen of its own on the one shared computer.
-  if (agentCount() >= env.maxBots) throw new UserError(`The team is full: the computer has room for ${env.maxBots} bots. Remove one to add another.`);
+  // MAX_BOTS, but never more bots than the computer has screens (MAX_SCREENS).
+  if (agentCount() >= screenLimit()) throw new UserError(`The team is full: the computer has room for ${screenLimit()} bots. Remove one to add another.`);
   const id = newId('bot');
   const shape = SHAPES.includes(b.avatarShape as AvatarShape) ? b.avatarShape : hashPick(id, SHAPES.slice(0, 13));
   const color = COLORS.includes(b.avatarColor as AvatarColor) ? b.avatarColor : hashPick(id, COLORS.filter((c) => c !== 'black'));

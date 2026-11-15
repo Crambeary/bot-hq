@@ -1,11 +1,13 @@
 /**
- * Dresses a few screens of the TEST computer for made-up bots and checks the result.
+ * Dresses a few screens of the local computer (this container) for made-up bots and checks the result.
  *
- *   cd platform/server
- *   ORGO_COMPUTER_ID=<test computer id> npx tsx --env-file=../.env scripts/desk-test.ts
+ *   docker compose exec hq bash -c 'cd /opt/hq/app/server && DB_PATH=/tmp/desk-test.db npx tsx scripts/desk-test.ts'
+ *
+ * Run it on a container whose extra screens no real bot uses yet: it dresses them for made-up bots.
+ * DB_PATH points at a throwaway database so the app's own one is not touched.
  *
  * What it does, in order:
- *   1. uses up to three extra screens (creates screens only when fewer than two exist)
+ *   1. starts up to three extra displays (:100, ...; as many as MAX_BOTS allows, at least two wanted)
  *   2. dresses each extra screen for its own bot with a managed Chrome, twice (first run and repeat)
  *   3. renames and recolours one bot and dresses again
  *   4. shrinks one Chrome so wallpaper and dock show, opens a terminal, then resets that screen
@@ -21,9 +23,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { env } from '../src/env.js';
-import { orgo } from '../src/orgo.js';
 import { box } from '../src/box.js';
+import { screenLimit, startDisplay } from '../src/computer.js';
 import { cdpPortFor, dressScreen, ensureDeskBase, openTerminal, resetScreen, undressScreen, type DeskBot } from '../src/desk.js';
 
 const SHOTS = process.env.DESK_SHOTS || path.join(os.tmpdir(), 'desk-test');
@@ -133,10 +134,11 @@ async function until<T>(fn: () => Promise<T | null | undefined | false>, ms: num
 }
 
 async function shot(screenId: string, name: string): Promise<string> {
-  const r = await orgo.screenshot(env.orgoComputerId, screenId);
-  const file = path.join(SHOTS, `${name}.${(r.mime_type ?? 'image/jpeg').includes('png') ? 'png' : 'jpg'}`);
-  fs.writeFileSync(file, Buffer.from(r.image, 'base64'));
-  say(`  shot ${file}  (${r.width}x${r.height})`);
+  const png = await box.screenshot(screenId);
+  const file = path.join(SHOTS, `${name}.png`);
+  if (!png) { say(`  shot ${file}: no picture of ${screenId}`); return file; }
+  fs.writeFileSync(file, png);
+  say(`  shot ${file}  (${png.length} bytes)`);
   return file;
 }
 
@@ -177,21 +179,21 @@ const look = async (screenId: string) => {
 // ---------- the run ----------
 
 async function extraScreens(): Promise<string[]> {
-  let screens = await orgo.listScreens(env.orgoComputerId);
-  say(`screens now: ${screens.map((s) => `${s.id} ${s.width}x${s.height}`).join(', ')}`);
   const asked = Number(process.env.DESK_SCREENS || 0);
-  const want = Math.min(3, Math.max(1, asked || Math.max(2, screens.filter((s) => !s.default).length)));
-  while (screens.filter((s) => !s.default).length < want) {
+  const want = Math.min(3, screenLimit() - 1, Math.max(1, asked || 2));
+  const ids: string[] = [];
+  for (let i = 0; i < want; i++) {
+    const id = `screen-${100 + i}`;
     try {
-      const made = await orgo.createScreen(env.orgoComputerId);
-      say(`created ${made.id} (${made.width}x${made.height})`);
+      const s = await startDisplay(id);
+      say(`${id}: ${s.width}x${s.height}${s.started ? ' (started)' : ''}`);
+      ids.push(id);
     } catch (e: any) {
-      say(`could not create another screen: ${e?.message ?? e}`);
+      say(`could not start ${id}: ${e?.message ?? e}`);
       break;
     }
-    screens = await orgo.listScreens(env.orgoComputerId);
   }
-  return screens.filter((s) => !s.default).map((s) => s.id).slice(0, want);
+  return ids;
 }
 
 async function testExtras(ids: string[]): Promise<void> {
@@ -314,10 +316,8 @@ async function testDefault(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (box.local) throw new Error('this test drives a remote test computer through Orgo; run it without HQ_LOCAL');
-  if (!env.orgoComputerId) throw new Error('set ORGO_COMPUTER_ID to the test computer');
   fs.mkdirSync(SHOTS, { recursive: true });
-  say(`test computer ${env.orgoComputerId}, screenshots in ${SHOTS}`);
+  say(`local computer (MAX_BOTS allows ${screenLimit()} screens), screenshots in ${SHOTS}`);
 
   const ids = await extraScreens();
   if (!ids.length) throw new Error('no extra screen to work with');

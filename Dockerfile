@@ -69,7 +69,8 @@ COPY --exclude=ext server/box /opt/hq
 COPY server/box/ext /opt/hq/ext/src
 COPY docker/supervisord.conf /etc/supervisor/conf.d/hq.conf
 COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod 755 /entrypoint.sh /opt/hq/*.py /opt/hq/app/scripts/*.sh
+COPY docker/hq-display.sh /usr/local/bin/hq-display.sh
+RUN chmod 755 /entrypoint.sh /usr/local/bin/hq-display.sh /opt/hq/*.py /opt/hq/app/scripts/*.sh
 
 ENV HQ_ROOT=/opt/hq HQ_LOGS=/var/log/hq HQ_PROFILES=/root/grokbot/profiles HQ_FILES=/root/grokbot/files \
     HQ_NO_APT=1
