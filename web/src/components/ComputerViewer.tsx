@@ -188,10 +188,15 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
   };
   // Ctrl+V reaches the remote desktop as a keypress, so the clipboard button is the sure way to send text over.
   const pasteToScreen = () => {
-    navigator.clipboard?.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setPasteBox(true));
+    if (conn !== 'connected') { setNote('Not connected'); return; }
+    // No clipboard API (an insecure origin): go straight to the paste box.
+    if (!navigator.clipboard?.readText) { setPasteBox(true); return; }
+    navigator.clipboard.readText().then((text) => { if (text) rfbRef.current?.clipboardPasteFrom(text); }).catch(() => setPasteBox(true));
   };
   // Fallback when the browser won't let us read the clipboard: the person pastes into a local box instead.
   const sendPasteBox = (el: HTMLInputElement) => {
+    // noVNC ignores a paste while disconnected: keep the text so it can be sent once the screen is back.
+    if (conn !== 'connected') { setNote('Not connected'); return; }
     if (el.value) rfbRef.current?.clipboardPasteFrom(el.value);
     el.value = '';
     setPasteBox(false);
@@ -324,10 +329,10 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
                   data-1p-ignore
                   data-lpignore="true"
                   spellCheck={false}
-                  onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
                 />
               )}
-              <button type="button" className="screen__chin-btn" onClick={pasteToScreen} title="Send your clipboard text to this screen, then paste there (Ctrl+Shift+V in a terminal)">Paste to screen</button>
+              <button type="button" className="screen__chin-btn" onClick={pasteToScreen} disabled={conn !== 'connected'} title="Send your clipboard text to this screen, then paste there (Ctrl+Shift+V in a terminal)">Paste to screen</button>
               {canFullscreen && (
                 <button type="button" className="screen__chin-icon" onClick={toggleFullscreen} aria-label={fullscreen ? 'Leave full screen' : 'Full screen'} title={fullscreen ? 'Leave full screen' : 'Full screen'}>
                   <Icon name={fullscreen ? 'shrink' : 'expand'} size={15} />
