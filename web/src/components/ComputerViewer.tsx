@@ -353,7 +353,8 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
                   placeholder="Paste text (hidden), press Enter"
                   aria-label="Text to send to the screen"
                   autoFocus
-                  onChange={() => { pasteRaw.current = null; }}
+                  // After a multiline paste the box shows only placeholder dots: ignore edits (Backspace/Delete discards the paste) so the dots are never sent.
+                  onChange={(e) => { if (pasteRaw.current !== null) e.currentTarget.value = '•'.repeat(Math.min(pasteRaw.current.length, 24)); }}
                   onPaste={(e) => {
                     const text = e.clipboardData.getData('text/plain');
                     if (!/[\r\n]/.test(text)) return;
@@ -365,7 +366,7 @@ export function ComputerScreen({ bot, variant, initialMode = 'watch', hint, paus
                   data-1p-ignore
                   data-lpignore="true"
                   spellCheck={false}
-                  onKeyDown={(e) => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
+                  onKeyDown={(e) => { e.stopPropagation(); if (e.nativeEvent.isComposing) return; if (pasteRaw.current !== null && (e.key === 'Backspace' || e.key === 'Delete')) { e.preventDefault(); pasteRaw.current = null; e.currentTarget.value = ''; return; } if (e.key === 'Enter') sendPasteBox(e.currentTarget); else if (e.key === 'Escape') setPasteBox(false); }}
                 />
               )}
               <button type="button" className="screen__chin-btn" onClick={pasteToScreen} disabled={conn !== 'connected'} title="Send your clipboard text to this screen, then paste there (Ctrl+Shift+V in a terminal)">Paste to screen</button>
