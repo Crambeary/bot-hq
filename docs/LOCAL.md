@@ -141,6 +141,7 @@ Implemented and merged. Smallest slice; one display `:99`, no multi-bot.
 Acceptance:
 
 ```
+export ALLOWED_EMAILS=you@example.com  # required by compose; an exported value overrides the same key in .env
 docker compose build && docker compose up -d
 docker compose ps                      # hq healthy
 curl -fsS http://127.0.0.1:8787/api/health        # {"ok":true,"engine":"hermes"}
@@ -187,7 +188,7 @@ Status per sub-item, against the merged tree. Items 2 and 3 are in the code; wha
    - Done: `/api/auth/dev` checks `Origin` against `APP_URL`, and with no `Origin` header requires `Host` to equal the `APP_URL` host (`routes.ts:112-114`; foreign gets 403).
    - Done: websocket upgrade `Origin` check (`vnc.ts:23-30,94`), recorded in Phase 2 results. Note it accepts an Origin that matches `APP_URL` or the request `Host`; the `/api/auth/dev` check accepts only `APP_URL` (or, with no Origin, the `Host`).
    - Done: `.env.example` and compose default `DEV_LOGIN=0`.
-   - Open: no automated or recorded check of the `/api/auth/dev` 403s (empty `ALLOWED_EMAILS`, foreign `Origin`). Run them against a container with `DEV_LOGIN=1` and record the result here. `tests/e2e.mjs:29` posts to `/api/auth/dev` without an `Origin`, so it passes only when its `Host` matches `APP_URL`.
+   - Done: the `/api/auth/dev` 403s (empty `ALLOWED_EMAILS`, foreign `Origin`) are recorded in the acceptance results below, run against the real server process. Still open: no automated test, and not yet run against a container with `DEV_LOGIN=1`. `tests/e2e.mjs:29` posts to `/api/auth/dev` without an `Origin`, so it passes only when its `Host` matches `APP_URL`.
 3. **Remaining web hiding and wording.** Done: every web item in section 3 (including `CreateBotModal.tsx:82` and the SignIn text). Open: confirm in a browser against a container with no Composio/xAI keys that nothing visible is left; the Orgo wake/sleep UI is gated by `features.orgo`, not removed (`AppSettings.tsx:133-137`, `ComputerViewer.tsx:66-78`, `LibraryTab.tsx:66`, `configApi.ts:61-62`), which is acceptable as long as Orgo is out of scope for the local build.
 4. **Prompt snapshot test.**
    - Done: `server/test/prompt-snapshot.ts` runs `instructionsFor` from `agent/prompt.ts` with `features` all ON and compares to `server/test/prompt-snapshot.txt`.
@@ -196,6 +197,26 @@ Status per sub-item, against the merged tree. Items 2 and 3 are in the code; wha
    - Open: the snapshot text should be confirmed byte-identical to the pre-change prompt (git history before `e8c3e12`); it was not recorded that this was checked.
 
 Acceptance: a Claude-backed bot replies; `/api/auth/dev` returns 403 with `DEV_LOGIN=1` and empty `ALLOWED_EMAILS`; `/api/auth/dev` with a foreign `Origin` returns 403; a websocket upgrade with a foreign `Origin` is refused (done in Phase 2); `/api/voice/*` and `/api/apps/*` return 503 with no keys.
+
+**Acceptance results (run against the real server, not the container).** Built with `npm run build -w server` and started with `node dist/index.js` on Node 26 (the image's Node was not used; `tsx` could not run in the sandbox). Env: `DEV_LOGIN=1`, `APP_URL=http://localhost:<port>` (matching `PORT`), throwaway `DB_PATH`, a freshly generated throwaway `SESSION_SECRET`, no Composio/xAI/Orgo keys. `docker compose` was not used, so the compose-level wiring (`DEV_LOGIN: "0"`, `ALLOWED_EMAILS` required) is not covered by this run. Status code is what each request returned.
+
+| Check | Setup | Result |
+|---|---|---|
+| `/api/auth/dev` with empty `ALLOWED_EMAILS` | `ALLOWED_EMAILS=` | **PASS**: 403 for every request (matching Origin, no Origin, foreign Origin, wrong Host); log `[auth] DEV_LOGIN disabled: ALLOWED_EMAILS is empty`; `/auth/me` shows `devLogin:false`. |
+| `/api/auth/dev` with a foreign `Origin` | `ALLOWED_EMAILS=a@example.com`, `Origin: http://evil.example` | **PASS**: 403. |
+| `/api/auth/dev` with an allowed email and matching `Origin` | `Origin` = `APP_URL`, `a@example.com` | **PASS**: 200 and a `grokbot_session` cookie is set. |
+| `/api/auth/dev` with a matching `Origin` but a non-listed email | `b@example.com` | **PASS**: 403. |
+| `/api/auth/dev` with no `Origin` | `Host` equals the `APP_URL` host | 200 (as designed, and why `tests/e2e.mjs:29`, which sends no `Origin`, works against a local server). |
+| `/api/auth/dev` with no `Origin`, wrong `Host` | `Host: evil.example` | **PASS**: 403. |
+| Websocket upgrade to `/api/bots/:id/screen` with a foreign `Origin` | valid session cookie | **PASS**: refused, HTTP 403. |
+| Same upgrade with no `Origin` | valid session cookie | **PASS** (refused, HTTP 403; a non-browser client is refused by design). |
+| Same upgrade with `Origin` = `APP_URL` | valid session cookie | Accepted (upgrade completed). The relay's upstream (a VNC server) does not exist outside the container, so nothing was relayed. |
+| `/api/voice/*`, `/api/apps`, `/api/apps/*` with no keys | no Composio/xAI | **PASS**: 503 `{"error":"disabled"}` (checked in both server runs, without a session cookie; `/auth/me` reports all `features` false). |
+| `npm run typecheck -w server` | | **PASS**. |
+| Claude-backed bot replies (live Codex/Claude sign-in and message round trip) | needs a real account | **NOT RUN, pending**. |
+| Clipboard bridge for pasting the Anthropic code (item 1) | | **NOT RUN**: not built. |
+
+Not covered: the checks ran against a local process, not the container (the websocket foreign-`Origin` refusal was also verified inside the container in Phase 2). The 503 check was made without a session cookie only.
 
 ### Phase 4: optional
 
